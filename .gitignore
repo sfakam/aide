@@ -1,0 +1,18 @@
+# Binaries
+/aide
+/clawpty
+
+# Database files
+*.db
+
+# Config with secrets (use config.example.yaml as template)
+config.yaml
+
+# Session workspaces
+*.db-shm
+*.db-wal
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo

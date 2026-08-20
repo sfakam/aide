@@ -1,0 +1,70 @@
+tasks:
+
+  # ── Daily standup summary ────────────────────────────────────────────────────
+  - id: morning-standup
+    name: Morning Standup Summary
+    enabled: true
+    worker_id: assistant
+    session_mode: task-isolated   # own PTY, doesn't mix with user conversations
+    prompt: |
+      Please provide a brief morning standup summary for the team:
+      - What are the key priorities for today?
+      - Any blockers or risks to flag?
+      Keep it to 3–5 bullet points, chat-friendly length.
+    schedule: "0 9 * * 1-5"       # 9:00 AM every weekday
+    timeout_secs: 120
+    outputs:
+      - channel_id: my-telegram
+        room_id: "-100123456789"   # Telegram group chat id
+      - channel_id: my-webex
+        room_id: "Y2lzY29zcGFyazovL3VzL1JPT00vexample"
+
+  # ── Hourly health ping ───────────────────────────────────────────────────────
+  - id: hourly-health
+    name: Hourly Health Check
+    enabled: false                 # disabled by default — enable when needed
+    worker_id: monitor
+    session_mode: worker-shared   # reuses the monitor worker's shared context
+    prompt: |
+      Run a quick health check. Report:
+      - Any anomalies or concerns
+      - Current system status in one line
+      If everything is normal, reply: "✅ All systems nominal."
+    schedule: "@hourly"
+    timeout_secs: 60
+    outputs:
+      - channel_id: my-telegram
+        room_id: "987654321"
+
+  # ── Weekly digest ────────────────────────────────────────────────────────────
+  - id: weekly-digest
+    name: Weekly Digest
+    enabled: true
+    worker_id: assistant
+    session_mode: task-isolated
+    prompt: |
+      It's the end of the week. Please write a brief weekly digest:
+      - Key themes and topics discussed this week
+      - Any action items or follow-ups
+      - One encouraging closing thought
+      Format it for a team chat message.
+    schedule: "0 17 * * 5"        # 5:00 PM every Friday
+    timeout_secs: 180
+    outputs:
+      - channel_id: my-webex
+        room_id: "Y2lzY29zcGFyazovL3VzL1JPT00vexample"
+
+  # ── Pattern: multi-output fan-out ───────────────────────────────────────────
+  - id: daily-briefing
+    name: Daily Briefing
+    enabled: false
+    worker_id: assistant
+    session_mode: task-isolated
+    prompt: "Give today's briefing. Be concise — this goes to multiple channels."
+    schedule: "30 8 * * *"        # 8:30 AM daily
+    timeout_secs: 90
+    outputs:
+      - channel_id: my-telegram
+        room_id: "111222333"
+      - channel_id: my-webex
+        room_id: "Y2lzY29zcGFyazovL3VzL1JPT00vexample2"
