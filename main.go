@@ -19,6 +19,8 @@ import (
 	"github.com/sfathall/aide/store"
 )
 
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	dbPath     := flag.String("db", "aide.db", "path to SQLite database")
@@ -112,7 +114,7 @@ func main() {
 		}
 	}
 
-	slog.Info("aide started")
+	slog.Info("aide started", "version", version)
 	for {
 		select {
 		case msg := <-inbound:
