@@ -155,7 +155,7 @@ func buildChannel(cc config.Channel) channels.Channel {
 	case "telegram":
 		return telegram.New(cc.ID, cc.BotToken, interval)
 	case "webex":
-		return webex.New(cc.ID, cc.BotToken, cc.RoomID, cc.Direct, interval)
+		return webex.New(cc.ID, cc.BotToken, cc.RoomID, cc.DirectWith, cc.Direct, interval)
 	default:
 		return nil
 	}

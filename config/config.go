@@ -27,8 +27,9 @@ type Channel struct {
 	Type             string  `yaml:"type"`              // "telegram" | "webex"
 	BotToken         string  `yaml:"bot_token"`
 	PollIntervalSecs float64 `yaml:"poll_interval_secs"`
-	RoomID           string  `yaml:"room_id"` // webex: restrict to one room
-	Direct           bool    `yaml:"direct"`  // webex: 1:1 direct room — no @mention required
+	RoomID           string  `yaml:"room_id"`    // webex: restrict to one room (auto-discovered if direct_with is set)
+	Direct           bool    `yaml:"direct"`     // webex: 1:1 direct room — no @mention required
+	DirectWith       string  `yaml:"direct_with"` // webex: person email to open/find a 1:1 with; sets direct=true implicitly
 }
 
 // Worker is a named Claude instance.

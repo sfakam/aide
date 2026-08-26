@@ -23,8 +23,9 @@ const apiBase = "https://webexapis.com/v1"
 type Channel struct {
 	id           string
 	token        string
-	roomID       string // the Webex room to watch
+	roomID       string // the Webex room to watch (may be resolved at Start time)
 	direct       bool   // true for 1:1 direct rooms — skips mentionedPeople filter
+	directWith   string // if set, resolve roomID from this person's email at Start time
 	botID        string // bot's own person ID (to detect mentions and skip self-messages)
 	pollInterval time.Duration
 	log          *slog.Logger
@@ -36,12 +37,15 @@ type Channel struct {
 }
 
 // New creates a Webex Channel adapter.
-func New(id, token, roomID string, direct bool, pollInterval time.Duration) *Channel {
+// If directWith is non-empty, roomID is auto-discovered at Start time via the
+// Webex API by finding or creating a 1:1 room with that person's email.
+func New(id, token, roomID, directWith string, direct bool, pollInterval time.Duration) *Channel {
 	c := &Channel{
 		id:           id,
 		token:        token,
 		roomID:       roomID,
-		direct:       direct,
+		direct:       direct || directWith != "",
+		directWith:   directWith,
 		pollInterval: pollInterval,
 		log:          slog.With("channel", id, "type", "webex"),
 		lastSeen:     time.Now().UTC(),
@@ -61,6 +65,15 @@ func (c *Channel) Start(ctx context.Context, inbound chan<- channels.InboundMess
 		} else {
 			c.botID = id
 		}
+	}
+
+	if c.roomID == "" && c.directWith != "" {
+		roomID, err := c.resolveDirectRoom(ctx, c.directWith)
+		if err != nil {
+			return fmt.Errorf("resolve direct room with %q: %w", c.directWith, err)
+		}
+		c.roomID = roomID
+		c.log.Info("direct room resolved", "person", c.directWith, "room_id", roomID)
 	}
 
 	c.log.Info("starting", "room", c.roomID, "interval", c.pollInterval, "since", c.lastSeen.UTC().Format(time.RFC3339Nano))
@@ -276,6 +289,113 @@ func retryAfter(resp *http.Response, defaultWait time.Duration) time.Duration {
 		}
 	}
 	return defaultWait
+}
+
+// resolveDirectRoom finds the 1:1 room between this bot and personEmail.
+// It lists direct rooms for the bot and checks memberships. If no room exists
+// yet, it creates one by sending an initial message (which Webex auto-creates
+// the room for), then returns the new room ID.
+func (c *Channel) resolveDirectRoom(ctx context.Context, personEmail string) (string, error) {
+	// Walk paginated direct rooms looking for personEmail as a member.
+	url := fmt.Sprintf("%s/rooms?type=direct&max=50", apiBase)
+	for url != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return "", err
+		}
+		var page struct {
+			Items []struct {
+				ID string `json:"id"`
+			} `json:"items"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&page)
+		resp.Body.Close()
+		if err != nil {
+			return "", err
+		}
+		for _, room := range page.Items {
+			ok, err := c.roomHasMember(ctx, room.ID, personEmail)
+			if err != nil {
+				c.log.Debug("membership check failed", "room", room.ID, "err", err)
+				continue
+			}
+			if ok {
+				return room.ID, nil
+			}
+		}
+		// Webex uses Link header for pagination; stop if no next page.
+		link := resp.Header.Get("Link")
+		url = nextPageURL(link)
+	}
+
+	// No existing room — create one by sending an initial message.
+	payload := fmt.Sprintf(`{"toPersonEmail":%s,"text":"👋 aide bot connected."}`, jsonString(personEmail))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		apiBase+"/messages", strings.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("create direct room HTTP %d: %s", resp.StatusCode, body)
+	}
+	var msg struct {
+		RoomID string `json:"roomId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&msg); err != nil {
+		return "", err
+	}
+	return msg.RoomID, nil
+}
+
+// roomHasMember returns true if personEmail is a member of roomID.
+func (c *Channel) roomHasMember(ctx context.Context, roomID, personEmail string) (bool, error) {
+	url := fmt.Sprintf("%s/memberships?roomId=%s&personEmail=%s", apiBase, roomID, personEmail)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Items []struct{ ID string } `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, err
+	}
+	return len(result.Items) > 0, nil
+}
+
+// nextPageURL parses a Webex Link header and returns the "next" URL, or "".
+func nextPageURL(link string) string {
+	// Format: <https://...>; rel="next"
+	for _, part := range strings.Split(link, ",") {
+		part = strings.TrimSpace(part)
+		if strings.Contains(part, `rel="next"`) {
+			if start := strings.Index(part, "<"); start >= 0 {
+				if end := strings.Index(part, ">"); end > start {
+					return part[start+1 : end]
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (c *Channel) fetchBotID(ctx context.Context) (string, error) {
