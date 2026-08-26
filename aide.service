@@ -3,6 +3,7 @@ Description=aide — Claude Code bot daemon
 After=network.target
 
 [Service]
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/local/bin/aide --config %h/.aide/config.yaml --db %h/.aide/aide.db
 Restart=on-failure
 RestartSec=5s

@@ -28,6 +28,7 @@ type Channel struct {
 	BotToken         string  `yaml:"bot_token"`
 	PollIntervalSecs float64 `yaml:"poll_interval_secs"`
 	RoomID           string  `yaml:"room_id"` // webex: restrict to one room
+	Direct           bool    `yaml:"direct"`  // webex: 1:1 direct room — no @mention required
 }
 
 // Worker is a named Claude instance.
@@ -39,11 +40,12 @@ type Worker struct {
 
 // Wiring links a channel to a worker with routing and session rules.
 type Wiring struct {
-	ChannelID     string `yaml:"channel_id"`
-	WorkerID      string `yaml:"worker_id"`
-	EngageMode    string `yaml:"engage_mode"`    // "always" | "mention" | "pattern"
-	EngagePattern string `yaml:"engage_pattern"` // regex; required when mode=pattern
-	SessionMode   string `yaml:"session_mode"`   // "per-user" | "shared" | "worker-shared"
+	ChannelID     string   `yaml:"channel_id"`
+	WorkerID      string   `yaml:"worker_id"`
+	EngageMode    string   `yaml:"engage_mode"`    // "always" | "mention" | "pattern"
+	EngagePattern string   `yaml:"engage_pattern"` // regex; required when mode=pattern
+	SessionMode   string   `yaml:"session_mode"`   // "per-user" | "shared" | "worker-shared"
+	AllowedUsers  []string `yaml:"allowed_users"`  // email allowlist; empty = allow all
 }
 
 // Load reads a YAML config file, applies defaults, and validates it.

@@ -18,6 +18,13 @@ channels:
     room_id: "Y2lzY29zcGFyazovL3VzL1JPT00vexample"
     poll_interval_secs: 10
 
+  - id: my-webex-dm
+    type: webex
+    bot_token: "your-webex-bot-token"
+    room_id: "Y2lzY29zcGFyazovL3VzL1JPT00vdirect-example"
+    direct: true          # 1:1 direct room — all messages delivered, no @mention needed
+    poll_interval_secs: 10
+
 workers:
   - id: assistant
     work_dir: ~/.aide/sessions/assistant  # optional; defaults to work_dir/<id>
@@ -46,3 +53,12 @@ wirings:
     engage_mode: pattern
     engage_pattern: "^!code"
     session_mode: worker-shared
+
+  # Webex DM: respond to everything, but only from specific users
+  - channel_id: my-webex-dm
+    worker_id: assistant
+    engage_mode: always
+    session_mode: per-user
+    allowed_users:
+      - you@example.com
+      - colleague@example.com

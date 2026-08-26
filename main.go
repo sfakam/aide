@@ -17,6 +17,7 @@ import (
 	"github.com/sfathall/aide/pty"
 	"github.com/sfathall/aide/router"
 	"github.com/sfathall/aide/store"
+	"github.com/sfathall/aide/tasks"
 )
 
 var version = "dev"
@@ -80,6 +81,23 @@ func main() {
 	// Build router
 	rt := router.New(cfg, fanout, chs)
 
+	// Load and schedule tasks
+	taskCfg, err := tasks.Load(cfg.TasksPath)
+	if err != nil {
+		slog.Error("failed to load tasks", "err", err)
+		os.Exit(1)
+	}
+	sched := newScheduler(fanout, chs)
+	for _, t := range taskCfg.EnabledTasks() {
+		if err := sched.add(t); err != nil {
+			slog.Error("failed to schedule task", "task", t.ID, "schedule", t.Schedule, "err", err)
+			os.Exit(1)
+		}
+		slog.Info("task scheduled", "task", t.ID, "name", t.Name, "schedule", t.Schedule)
+	}
+	sched.start()
+	defer sched.stop()
+
 	// Inbound message bus
 	inbound := make(chan channels.InboundMessage, 64)
 
@@ -133,7 +151,7 @@ func buildChannel(cc config.Channel) channels.Channel {
 	case "telegram":
 		return telegram.New(cc.ID, cc.BotToken, interval)
 	case "webex":
-		return webex.New(cc.ID, cc.BotToken, cc.RoomID, interval)
+		return webex.New(cc.ID, cc.BotToken, cc.RoomID, cc.Direct, interval)
 	default:
 		return nil
 	}

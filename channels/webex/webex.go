@@ -23,6 +23,7 @@ type Channel struct {
 	id           string
 	token        string
 	roomID       string // the Webex room to watch
+	direct       bool   // true for 1:1 direct rooms — skips mentionedPeople filter
 	botID        string // bot's own person ID (to detect mentions and skip self-messages)
 	pollInterval time.Duration
 	log          *slog.Logger
@@ -32,11 +33,12 @@ type Channel struct {
 }
 
 // New creates a Webex Channel adapter.
-func New(id, token, roomID string, pollInterval time.Duration) *Channel {
+func New(id, token, roomID string, direct bool, pollInterval time.Duration) *Channel {
 	c := &Channel{
 		id:           id,
 		token:        token,
 		roomID:       roomID,
+		direct:       direct,
 		pollInterval: pollInterval,
 		log:          slog.With("channel", id, "type", "webex"),
 		lastSeen:     time.Now().UTC(),
@@ -203,9 +205,12 @@ type wxMessage struct {
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
 func (c *Channel) fetchMessages(ctx context.Context) ([]wxMessage, error) {
-	// Webex bots can only read messages where they are mentioned.
-	// Webex doesn't support a "since" query param; we filter by Created in-process.
-	url := fmt.Sprintf("%s/messages?roomId=%s&mentionedPeople=me&max=50", apiBase, c.roomID)
+	// Direct (1:1) rooms deliver all messages to the bot without a mention filter.
+	// Group spaces require mentionedPeople=me — bots can't read unmentioned messages.
+	url := fmt.Sprintf("%s/messages?roomId=%s&max=50", apiBase, c.roomID)
+	if !c.direct {
+		url += "&mentionedPeople=me"
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

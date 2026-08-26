@@ -73,10 +73,6 @@ func (s *Session) Send(ctx context.Context, sender, text string) (string, error)
 	s.lastUsed = time.Now()
 	s.aliveMu.Unlock()
 
-	// Give each subprocess up to 5 minutes (enough for long skills like full-pr-review).
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-
 	var prompt string
 	if cmd := extractSlashCmd(text); cmd != "" {
 		prompt = cmd

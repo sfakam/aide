@@ -176,6 +176,19 @@ func keepTyping(ctx context.Context, tc channels.TypingChannel, roomID string) {
 
 // engaged returns true if the wiring should handle this message.
 func (r *Router) engaged(wiringIndex int, w config.Wiring, msg channels.InboundMessage) bool {
+	if len(w.AllowedUsers) > 0 {
+		allowed := false
+		for _, u := range w.AllowedUsers {
+			if strings.EqualFold(u, msg.SenderName) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			slog.Debug("sender not in allowed_users", "sender", msg.SenderName)
+			return false
+		}
+	}
 	switch w.EngageMode {
 	case "always":
 		return true
