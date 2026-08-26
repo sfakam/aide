@@ -1,0 +1,11 @@
+[Unit]
+Description=aide — Claude Code bot daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/aide --config %h/.aide/config.yaml --db %h/.aide/aide.db
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
