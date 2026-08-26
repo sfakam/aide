@@ -24,6 +24,12 @@ service: install
 	else \
 		echo "~/.aide/config.yaml already exists — not overwritten"; \
 	fi
+	@if [ ! -f ~/.aide/tasks.yaml ]; then \
+		cp tasks.example.yaml ~/.aide/tasks.yaml; \
+		echo "Created ~/.aide/tasks.yaml — edit to enable/configure scheduled tasks"; \
+	else \
+		echo "~/.aide/tasks.yaml already exists — not overwritten"; \
+	fi
 	install -m 644 aide.service ~/.config/systemd/user/aide.service
 	systemctl --user daemon-reload
 	systemctl --user enable aide

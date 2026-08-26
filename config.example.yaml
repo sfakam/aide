@@ -4,7 +4,7 @@
 claude_path: claude                        # path to claude CLI binary
 work_dir: ~/.aide                       # base directory for all session subdirs
 db_path: ~/.aide/aide.db             # SQLite cursor persistence
-tasks_path: tasks.yaml                     # scheduled tasks file (optional)
+tasks_path: ~/.aide/tasks.yaml             # scheduled tasks file (optional)
 
 channels:
   - id: my-telegram
