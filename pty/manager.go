@@ -36,12 +36,13 @@ func NewManager(claudePath, baseWorkDir string, timeoutMinutes int) *Manager {
 }
 
 // Send routes a message to the session identified by key, spawning it if necessary.
-func (m *Manager) Send(ctx context.Context, key, sender, text string) (string, error) {
+// statusFn, if non-nil, is called with a progress label on each new tool invocation.
+func (m *Manager) Send(ctx context.Context, key, sender, text string, statusFn func(string)) (string, error) {
 	sess, err := m.getOrCreate(ctx, key)
 	if err != nil {
 		return "", fmt.Errorf("session %q: %w", key, err)
 	}
-	return sess.Send(ctx, sender, text)
+	return sess.Send(ctx, sender, text, statusFn)
 }
 
 // ActiveSessions returns a snapshot of currently alive session keys.

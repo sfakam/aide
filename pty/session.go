@@ -62,10 +62,11 @@ func (s *Session) start(_ context.Context) error {
 	return s.ensureWorkDir()
 }
 
-// Send runs `claude --print [--continue] <prompt>` and returns the response
-// from stdout. Subsequent calls use --continue so Claude Code resumes the same
-// conversation thread stored on disk in s.workDir.
-func (s *Session) Send(ctx context.Context, sender, text string) (string, error) {
+// Send runs `claude --print [--continue] <prompt>` and returns the response.
+// statusFn, if non-nil, is called with a short human-readable label each time
+// a new tool is invoked so callers can relay progress to the user.
+// Subsequent calls use --continue so Claude Code resumes the same conversation.
+func (s *Session) Send(ctx context.Context, sender, text string, statusFn func(string)) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -82,18 +83,17 @@ func (s *Session) Send(ctx context.Context, sender, text string) (string, error)
 		s.log.Debug("message", "sender", sender, "text", text[:min(60, len(text))])
 	}
 
-	out, err := s.runClaude(ctx, prompt, s.started)
+	resp, err := s.runClaude(ctx, prompt, s.started, statusFn)
 	if err != nil && s.started {
 		// --continue can fail if the prior session file was purged from disk.
 		s.log.Warn("--continue failed, retrying as new session", "err", err)
-		out, err = s.runClaude(ctx, prompt, false)
+		resp, err = s.runClaude(ctx, prompt, false, statusFn)
 	}
 	if err != nil {
 		return "", fmt.Errorf("claude subprocess: %w", err)
 	}
 
 	s.started = true
-	resp := StripDebugLogs(string(out))
 	s.log.Info("response received", "len", len(resp))
 	s.log.Debug("response text", "text", resp)
 	return resp, nil
@@ -122,8 +122,8 @@ func (s *Session) Kill() {
 
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
-func (s *Session) runClaude(ctx context.Context, prompt string, cont bool) ([]byte, error) {
-	args := []string{"--print", "--dangerously-skip-permissions"}
+func (s *Session) runClaude(ctx context.Context, prompt string, cont bool, statusFn func(string)) (string, error) {
+	args := []string{"--output-format", "stream-json", "--verbose", "--print", "--dangerously-skip-permissions"}
 	if cont {
 		args = append(args, "--continue")
 	}
@@ -132,8 +132,25 @@ func (s *Session) runClaude(ctx context.Context, prompt string, cont bool) ([]by
 	cmd := exec.CommandContext(ctx, s.claudePath, args...)
 	cmd.Dir = s.workDir
 	cmd.Env = buildChildEnv()
+	cmd.Stderr = nil // discard; debug logs appear as JSON on stdout with --verbose
 	s.log.Info("running claude --print", "continue", cont)
-	return cmd.Output()
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+	result, parseErr := parseStream(stdout, statusFn)
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		return "", waitErr
+	}
+	if parseErr != nil {
+		return "", parseErr
+	}
+	return result, nil
 }
 
 func (s *Session) ensureWorkDir() error {

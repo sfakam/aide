@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,7 +28,9 @@ type Channel struct {
 	botID        string // bot's own person ID (to detect mentions and skip self-messages)
 	pollInterval time.Duration
 	log          *slog.Logger
-	lastSeen     time.Time // ISO timestamp of last processed message
+
+	mu       sync.Mutex // protects lastSeen (written by Start goroutine, read by SaveCursor)
+	lastSeen time.Time  // ISO timestamp of last processed message
 
 	typingSupported atomic.Bool // flipped to false on first 404 from typing endpoint
 }
@@ -60,7 +63,7 @@ func (c *Channel) Start(ctx context.Context, inbound chan<- channels.InboundMess
 		}
 	}
 
-	c.log.Info("starting", "room", c.roomID, "interval", c.pollInterval, "since", c.lastSeen.Format(time.RFC3339))
+	c.log.Info("starting", "room", c.roomID, "interval", c.pollInterval, "since", c.lastSeen.UTC().Format(time.RFC3339Nano))
 	cycle := 0
 	for {
 		cycle++
@@ -80,11 +83,17 @@ func (c *Channel) Start(ctx context.Context, inbound chan<- channels.InboundMess
 					c.log.Debug("skipping own message", "msg_id", m.ID)
 					continue
 				}
-				created, _ := time.Parse(time.RFC3339, m.Created)
+				created := parseWebexTime(m.Created)
 				if !created.After(c.lastSeen) {
 					c.log.Debug("skipping seen message", "msg_id", m.ID, "created", m.Created)
 					continue
 				}
+				// Advance cursor BEFORE sending to inbound so SaveCursor() is
+				// never called with a stale value regardless of channel buffering.
+				c.mu.Lock()
+				c.lastSeen = created
+				c.mu.Unlock()
+				c.log.Debug("cursor advanced", "last_seen", created.UTC().Format(time.RFC3339Nano))
 				isMention := strings.Contains(m.HTML, "spark-mention")
 				c.log.Debug("dispatching message",
 					"msg_id", m.ID,
@@ -99,10 +108,6 @@ func (c *Channel) Start(ctx context.Context, inbound chan<- channels.InboundMess
 					SenderName: m.PersonEmail,
 					Text:       m.Text,
 					IsMention:  isMention,
-				}
-				if created.After(c.lastSeen) {
-					c.lastSeen = created
-					c.log.Debug("cursor advanced", "last_seen", c.lastSeen.Format(time.RFC3339))
 				}
 				dispatched++
 			}
@@ -179,15 +184,31 @@ func (c *Channel) LoadCursor(cursor string) {
 	if cursor == "" {
 		return
 	}
-	t, err := time.Parse(time.RFC3339, cursor)
-	if err == nil {
+	if t := parseWebexTime(cursor); !t.IsZero() {
+		c.mu.Lock()
 		c.lastSeen = t
+		c.mu.Unlock()
 	}
 }
 
-// SaveCursor returns lastSeen as an ISO timestamp string.
+// SaveCursor returns lastSeen as an ISO timestamp string with nanosecond
+// precision so sub-second Webex message timestamps survive a restart.
 func (c *Channel) SaveCursor() string {
-	return c.lastSeen.UTC().Format(time.RFC3339)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastSeen.UTC().Format(time.RFC3339Nano)
+}
+
+// parseWebexTime parses a Webex ISO timestamp, accepting both RFC3339Nano
+// (with sub-seconds) and plain RFC3339. Returns zero time on failure.
+func parseWebexTime(s string) time.Time {
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t
+	}
+	return time.Time{}
 }
 
 // ─── API types ────────────────────────────────────────────────────────────────

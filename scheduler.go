@@ -11,7 +11,7 @@ import (
 )
 
 type taskSender interface {
-	Send(ctx context.Context, key, sender, text string) (string, error)
+	Send(ctx context.Context, key, sender, text string, statusFn func(string)) (string, error)
 }
 
 type scheduler struct {
@@ -45,8 +45,11 @@ func (s *scheduler) run(t tasks.Task) {
 
 	s.log.Info("task starting", "task", t.ID, "name", t.Name, "timeout", timeout)
 	s.sendToOutputs(ctx, t, "⏳ Running task: **"+t.Name+"**…")
+	statusFn := func(status string) {
+		s.sendToOutputs(ctx, t, status)
+	}
 	start := time.Now()
-	resp, err := s.manager.Send(ctx, t.SessionKey(), "scheduler", t.Prompt)
+	resp, err := s.manager.Send(ctx, t.SessionKey(), "scheduler", t.Prompt, statusFn)
 	elapsed := time.Since(start).Round(time.Millisecond)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {

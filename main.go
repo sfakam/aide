@@ -137,6 +137,10 @@ func main() {
 		select {
 		case msg := <-inbound:
 			go rt.Dispatch(ctx, msg)
+			// Persist cursor immediately so a restart doesn't replay this message.
+			if err := db.SaveCursor(msg.ChannelID, chs[msg.ChannelID].SaveCursor()); err != nil {
+				slog.Warn("failed to save cursor after dispatch", "channel", msg.ChannelID, "err", err)
+			}
 		case <-ctx.Done():
 			slog.Info("shutting down")
 			saveCursorsOnce(chs, db)
@@ -184,7 +188,7 @@ type fanoutManager struct {
 	managers map[string]*pty.Manager
 }
 
-func (f *fanoutManager) Send(ctx context.Context, key, sender, text string) (string, error) {
+func (f *fanoutManager) Send(ctx context.Context, key, sender, text string, statusFn func(string)) (string, error) {
 	// Session key format: workerID, workerID:channelID, or workerID:channelID:senderID
 	workerID := key
 	for i := 0; i < len(key); i++ {
@@ -197,5 +201,5 @@ func (f *fanoutManager) Send(ctx context.Context, key, sender, text string) (str
 	if !ok {
 		return "", nil
 	}
-	return mgr.Send(ctx, key, sender, text)
+	return mgr.Send(ctx, key, sender, text, statusFn)
 }
