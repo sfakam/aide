@@ -41,12 +41,13 @@ type Worker struct {
 
 // Wiring links a channel to a worker with routing and session rules.
 type Wiring struct {
-	ChannelID     string   `yaml:"channel_id"`
-	WorkerID      string   `yaml:"worker_id"`
-	EngageMode    string   `yaml:"engage_mode"`    // "always" | "mention" | "pattern"
-	EngagePattern string   `yaml:"engage_pattern"` // regex; required when mode=pattern
-	SessionMode   string   `yaml:"session_mode"`   // "per-user" | "shared" | "worker-shared"
-	AllowedUsers  []string `yaml:"allowed_users"`  // email allowlist; empty = allow all
+	ChannelID       string   `yaml:"channel_id"`
+	WorkerID        string   `yaml:"worker_id"`
+	EngageMode      string   `yaml:"engage_mode"`       // "always" | "mention" | "pattern"
+	EngagePattern   string   `yaml:"engage_pattern"`    // regex; required when mode=pattern
+	SessionMode     string   `yaml:"session_mode"`      // "per-user" | "shared" | "worker-shared"
+	AllowedUsers    []string `yaml:"allowed_users"`     // email allowlist; empty = allow all
+	StatusBatchSecs int      `yaml:"status_batch_secs"` // group tool-call updates over N seconds (0 = send immediately)
 }
 
 // Load reads a YAML config file, applies defaults, and validates it.

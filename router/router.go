@@ -112,13 +112,25 @@ func (r *Router) Dispatch(ctx context.Context, msg channels.InboundMessage) {
 				go keepTyping(typingCtx, tc, msg.RoomID)
 			}
 
-			statusFn := func(status string) {
+			sendStatus := func(status string) {
 				if err := ch.Send(ctx, msg.RoomID, status); err != nil {
 					slog.Debug("status send failed", "err", err)
 				}
 			}
+			var statusFn func(string)
+			var flushStatus func()
+			if wiring.StatusBatchSecs > 0 {
+				b := newStatusBatcher(sendStatus, time.Duration(wiring.StatusBatchSecs)*time.Second)
+				statusFn = b.add
+				flushStatus = b.flush
+			} else {
+				statusFn = sendStatus
+				flushStatus = func() {}
+			}
+
 			slog.Debug("sending to worker", "worker", wiring.WorkerID, "key", key)
 			resp, err := r.manager.Send(ctx, key, msg.SenderName, msg.Text, statusFn)
+			flushStatus()
 
 			if stopTyping != nil {
 				stopTyping()
