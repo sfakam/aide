@@ -59,12 +59,11 @@ func (c *Channel) ID() string { return c.id }
 // Start begins polling. Blocks until ctx is cancelled.
 func (c *Channel) Start(ctx context.Context, inbound chan<- channels.InboundMessage) error {
 	if c.botID == "" {
-		id, err := c.fetchBotID(ctx)
+		id, err := c.fetchBotIDWithRetry(ctx)
 		if err != nil {
-			c.log.Warn("could not fetch bot ID — mention detection disabled", "err", err)
-		} else {
-			c.botID = id
+			return fmt.Errorf("could not fetch bot ID (self-echo filter disabled — refusing to poll): %w", err)
 		}
+		c.botID = id
 	}
 
 	if c.roomID == "" && c.directWith != "" {
@@ -138,8 +137,22 @@ func (c *Channel) Start(ctx context.Context, inbound chan<- channels.InboundMess
 	}
 }
 
-// Send posts a message to the configured room.
+// webexMaxLen is the conservative character limit for a single Webex message
+// (the hard API limit is 7439 bytes before encryption).
+const webexMaxLen = 7200
+
+// Send posts a message to the configured room, splitting it into multiple
+// messages if it exceeds webexMaxLen to preserve formatting.
 func (c *Channel) Send(ctx context.Context, roomID, text string) error {
+	for _, chunk := range splitMessage(text) {
+		if err := c.sendOne(ctx, roomID, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Channel) sendOne(ctx context.Context, roomID, text string) error {
 	payload := fmt.Sprintf(`{"roomId":%s,"markdown":%s}`, jsonString(roomID), jsonString(text))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		apiBase+"/messages", strings.NewReader(payload))
@@ -158,6 +171,58 @@ func (c *Channel) Send(ctx context.Context, roomID, text string) error {
 		return fmt.Errorf("webex sendMessage HTTP %d: %s", resp.StatusCode, body)
 	}
 	return nil
+}
+
+// splitMessage splits text into chunks of at most webexMaxLen bytes, breaking
+// only at paragraph boundaries (double newline), then line boundaries, never
+// inside a fenced code block.
+func splitMessage(text string) []string {
+	if len(text) <= webexMaxLen {
+		return []string{text}
+	}
+	split := findSplit(text, webexMaxLen)
+	first := strings.TrimRight(text[:split], "\n")
+	rest := strings.TrimLeft(text[split:], "\n")
+	if rest == "" {
+		return []string{first}
+	}
+	return append([]string{first}, splitMessage(rest)...)
+}
+
+// findSplit returns the index at which text should be split so that text[:i]
+// is at most maxLen bytes and does not end inside a fenced code block.
+// It prefers double-newline (paragraph) breaks, then single-newline breaks,
+// then a hard byte cut as a last resort.
+func findSplit(text string, maxLen int) int {
+	if maxLen > len(text) {
+		maxLen = len(text)
+	}
+	// Prefer paragraph boundary (\n\n).
+	for i := maxLen - 1; i > 1; i-- {
+		if text[i] == '\n' && text[i-1] == '\n' && !inCodeFence(text[:i]) {
+			return i + 1
+		}
+	}
+	// Fall back to line boundary (\n).
+	for i := maxLen - 1; i > 0; i-- {
+		if text[i] == '\n' && !inCodeFence(text[:i]) {
+			return i + 1
+		}
+	}
+	return maxLen
+}
+
+// inCodeFence reports whether text ends inside an unclosed fenced code block.
+// It counts lines that begin with ``` or ~~~; an odd count means still inside.
+func inCodeFence(text string) bool {
+	count := 0
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			count++
+		}
+	}
+	return count%2 == 1
 }
 
 // SendTyping sends a typing-indicator pulse to roomID.
@@ -396,6 +461,31 @@ func nextPageURL(link string) string {
 		}
 	}
 	return ""
+}
+
+// fetchBotIDWithRetry calls fetchBotID with exponential backoff (1s→2s→4s…→60s)
+// until it succeeds or ctx is cancelled. The bot ID is required for the
+// self-echo filter; polling must not start without it.
+func (c *Channel) fetchBotIDWithRetry(ctx context.Context) (string, error) {
+	delays := []time.Duration{time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second}
+	i := 0
+	for {
+		id, err := c.fetchBotID(ctx)
+		if err == nil {
+			return id, nil
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		delay := delays[min(i, len(delays)-1)]
+		i++
+		c.log.Warn("fetchBotID failed — retrying", "err", err, "backoff", delay)
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
 }
 
 func (c *Channel) fetchBotID(ctx context.Context) (string, error) {

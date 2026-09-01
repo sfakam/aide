@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Render compose.yml.j2 from config.yaml then run docker compose.
+#
+# Usage:
+#   ./launchdocker.sh [--config PATH] [--build] [--down] [-- <docker compose args>]
+#
+#   --config PATH   config.yaml to read (default: ~/.aide/config.yaml)
+#   --build         pass --build to docker compose up
+#   --down          run docker compose down instead of up -d
+#   --              everything after is forwarded to docker compose up/down
+#
+# The rendered compose file is written to ~/.aide/compose.generated.yml
+# and is safe to inspect or pass to docker compose manually.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATE="${SCRIPT_DIR}/compose.yml.j2"
+CONFIG="${HOME}/.aide/config.yaml"
+OUTPUT="${HOME}/.aide/compose.generated.yml"
+BUILD_FLAG=""
+MODE="up"
+EXTRA_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config)  CONFIG="$2"; shift 2 ;;
+    --build)   BUILD_FLAG="--build"; shift ;;
+    --down)    MODE="down"; shift ;;
+    --)        shift; EXTRA_ARGS=("$@"); break ;;
+    *)         echo "Unknown flag: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ ! -f "$CONFIG" ]]; then
+  echo "Config not found: $CONFIG" >&2
+  echo "Create ~/.aide/config.yaml (see config.example.yaml for the template)." >&2
+  exit 1
+fi
+
+if [[ ! -f "$TEMPLATE" ]]; then
+  echo "Template not found: $TEMPLATE" >&2
+  exit 1
+fi
+
+# ── Render the Jinja2 template via an inline Python script ────────────────────
+python3 - <<PYEOF
+import sys, os, subprocess
+
+# Ensure PyYAML and Jinja2 are available; install into user site if missing.
+def ensure(pkg, import_name=None):
+    import_name = import_name or pkg
+    try:
+        __import__(import_name)
+    except ImportError:
+        print(f"Installing {pkg}...", flush=True)
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "--quiet", "--user", pkg]
+        )
+
+ensure("PyYAML", "yaml")
+ensure("Jinja2", "jinja2")
+
+import yaml
+from jinja2 import Environment, FileSystemLoader
+
+config_path  = os.path.expanduser("${CONFIG}")
+template_dir = "${SCRIPT_DIR}"
+template_file = "compose.yml.j2"
+output_path  = os.path.expanduser("${OUTPUT}")
+
+with open(config_path) as f:
+    cfg = yaml.safe_load(f) or {}
+
+home = os.path.expanduser("~")
+uid  = os.getuid()
+import grp, pwd
+gid  = pwd.getpwuid(uid).pw_gid
+
+# Expand ~ in host-side paths of each extra volume entry.
+raw_volumes = (cfg.get("docker") or {}).get("volumes") or []
+extra_volumes = []
+for v in raw_volumes:
+    parts = v.split(":", 2)
+    parts[0] = os.path.expanduser(parts[0])
+    extra_volumes.append(":".join(parts))
+
+env = Environment(
+    loader=FileSystemLoader(template_dir),
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
+tmpl = env.get_template(template_file)
+rendered = tmpl.render(
+    home=home,
+    uid=uid,
+    gid=gid,
+    build_context=template_dir,
+    extra_volumes=extra_volumes,
+)
+
+os.makedirs(os.path.dirname(output_path), exist_ok=True)
+with open(output_path, "w") as f:
+    f.write(rendered)
+
+print(f"Rendered compose file: {output_path}")
+if extra_volumes:
+    print(f"Extra volumes ({len(extra_volumes)}):")
+    for v in extra_volumes:
+        print(f"  {v}")
+PYEOF
+
+# ── Run docker compose ────────────────────────────────────────────────────────
+COMPOSE_CMD=(docker compose -f "$OUTPUT")
+
+if [[ "$MODE" == "down" ]]; then
+  echo "Stopping aide container..."
+  "${COMPOSE_CMD[@]}" down "${EXTRA_ARGS[@]}"
+else
+  echo "Starting aide container..."
+  "${COMPOSE_CMD[@]}" up -d $BUILD_FLAG "${EXTRA_ARGS[@]}"
+  echo ""
+  echo "Logs:  docker compose -f ${OUTPUT} logs -f"
+  echo "Stop:  $0 --down"
+fi

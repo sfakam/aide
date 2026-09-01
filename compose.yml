@@ -1,0 +1,49 @@
+services:
+  aide:
+    image: ghcr.io/sfakam/aide:latest
+    build:
+      context: .
+      # Match UID/GID to the host user so mounted files have correct ownership.
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    restart: unless-stopped
+
+    volumes:
+      # ── Required ────────────────────────────────────────────────────────────
+
+      # aide config, session workdirs, and database  (read-write)
+      - ${HOME}/.aide:/home/aide/.aide:rw
+
+      # Claude Code auth, API key, settings, plugins  (read-only)
+      - ${HOME}/.claude:/home/aide/.claude:ro
+
+      # Claude Code versioned binaries from the host  (read-only)
+      # The entrypoint symlinks the latest version to ~/local/bin/claude at startup.
+      - ${HOME}/.local/share/claude:/home/aide/.local/share/claude:ro
+
+      # ── Optional — uncomment what your tasks/skills need ────────────────────
+
+      # mTLS certs used by Jira / Bitbucket / Confluence MCP servers
+      # - ${HOME}/.certs:/home/aide/.certs:ro
+
+      # Webex transcripts (needed for /sf:* skills)
+      # - ${HOME}/webex-scribe-home:/home/aide/webex-scribe-home:rw
+
+      # Additional project checkouts for aide sessions to work in
+      # - ${HOME}/git:/home/aide/git:rw
+
+    environment:
+      HOME: /home/aide
+
+    # Expose the aide REST API on loopback only — never bind 0.0.0.0
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    # Drop every Linux capability; aide and claude don't need any.
+    cap_drop:
+      - ALL
+
+    # Prevent privilege escalation inside the container.
+    security_opt:
+      - no-new-privileges:true

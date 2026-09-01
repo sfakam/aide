@@ -12,6 +12,10 @@ config.yaml
 *.db-shm
 *.db-wal
 
+# Docker — generated and local overrides (never commit)
+compose.override.yml
+compose.generated.yml
+
 # OS / editor
 .DS_Store
 *.swp

@@ -34,6 +34,16 @@ workers:
     work_dir: ~/.aide/sessions/coder
     session_timeout_minutes: 120
 
+# Docker-specific settings — only used by launchdocker.sh, ignored by aide itself.
+# Lists extra bind-mounts to inject into the generated compose file.
+# Use Docker volume syntax: host_path:container_path[:mode]
+# Tilde (~) is expanded to your home directory.
+docker:
+  volumes: []
+    # - ~/.certs:/home/aide/.certs:ro              # mTLS certs for Jira/Bitbucket/Confluence
+    # - ~/git:/home/aide/git:rw                    # code checkouts
+    # - ~/webex-scribe-home:/home/aide/webex-scribe-home:rw
+
 wirings:
   # Every Telegram message → assistant, one session per user
   - channel_id: my-telegram

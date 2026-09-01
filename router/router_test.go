@@ -21,7 +21,7 @@ type workerCall struct {
 	key, sender, text string
 }
 
-func (s *stubWorker) Send(_ context.Context, key, sender, text string) (string, error) {
+func (s *stubWorker) Send(_ context.Context, key, sender, text string, _ func(string)) (string, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, workerCall{key, sender, text})
 	s.mu.Unlock()
