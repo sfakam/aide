@@ -1,0 +1,22 @@
+# Git history — never needed in the build context
+.git
+
+# Compiled binaries (built inside Docker, not from host)
+aide
+clawpty
+
+# Runtime files — not part of the image
+*.db
+*.db-shm
+*.db-wal
+config.yaml
+tasks.yaml
+
+# Generated Docker files
+compose.generated.yml
+.env
+
+# Docs and scripts not needed inside the image
+*.md
+install.sh
+launchdocker.sh
