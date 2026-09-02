@@ -7,8 +7,11 @@ set -e
 CLAUDE_VERSIONS=/home/aide/.local/share/claude/versions
 LOCAL_BIN=/home/aide/.local/bin
 
-if [ -d "$CLAUDE_VERSIONS" ]; then
-  # Sort by version (ls -v) and take the newest
+# Fast path: binary already available on PATH (mounted directly from host).
+if command -v claude > /dev/null 2>&1; then
+  echo "aide: using claude at $(command -v claude)"
+# Slow path: Linux-style versioned install under ~/.local/share/claude/versions.
+elif [ -d "$CLAUDE_VERSIONS" ]; then
   LATEST=$(ls -v "$CLAUDE_VERSIONS" 2>/dev/null | tail -1)
   if [ -n "$LATEST" ]; then
     mkdir -p "$LOCAL_BIN"
@@ -18,7 +21,7 @@ if [ -d "$CLAUDE_VERSIONS" ]; then
     echo "aide: warning — no claude binary found in ${CLAUDE_VERSIONS}" >&2
   fi
 else
-  echo "aide: warning — ${CLAUDE_VERSIONS} not mounted; set claude_path in config.yaml" >&2
+  echo "aide: warning — claude not found; set claude_path in config.yaml" >&2
 fi
 
 exec "$@"

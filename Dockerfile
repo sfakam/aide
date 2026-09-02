@@ -16,15 +16,18 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags "-X main.version=${VERSION}" -o aide .
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 2: Minimal runtime image.
-# debian:bookworm-slim provides glibc (required by the claude ELF binary
-# mounted from the host) without adding unnecessary packages.
+# Stage 2: Runtime image with Node.js (required for claude CLI) and aide.
 FROM debian:bookworm-slim AS runtime
 
-# ca-certificates is needed for HTTPS calls aide or claude may make.
+# Install Node.js LTS (for claude CLI) and ca-certificates.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+ && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code — pulls the Linux binary for the container's arch.
+RUN npm install -g @anthropic-ai/claude-code --ignore-scripts=false
 
 # Non-root user. UID/GID default to 1000 but should match the host user
 # so that mounted volume files have the right ownership.

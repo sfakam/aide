@@ -92,21 +92,32 @@ for v in raw_volumes:
     parts[0] = os.path.expanduser(parts[0])
     extra_volumes.append(":".join(parts))
 
-# Auto-detect the claude binary on the host and inject it as a volume mount
-# so the container always has it, regardless of config.yaml.
+# Auto-detect the claude binary on the host and inject it as a volume mount,
+# but ONLY if it is a Linux ELF binary (not a macOS Mach-O — those cannot
+# run inside a Linux container and cause 'exec format error').
+# On macOS the image already contains a Linux-native claude via npm.
 import shutil
+
+def is_linux_elf(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"\x7fELF"
+    except OSError:
+        return False
+
 claude_host = shutil.which("claude")
 if claude_host:
-    claude_host = os.path.realpath(claude_host)  # resolve symlinks
-    claude_container = "/usr/local/bin/claude"
-    claude_mount = f"{claude_host}:{claude_container}:ro"
-    # Only add if the container path isn't already covered by extra_volumes
-    already_mounted = any(v.split(":")[1] == claude_container for v in extra_volumes if ":" in v)
-    if not already_mounted:
-        extra_volumes.insert(0, claude_mount)
-        print(f"Auto-detected claude: {claude_host}", flush=True)
+    claude_host = os.path.realpath(claude_host)
+    if is_linux_elf(claude_host):
+        claude_container = "/usr/local/bin/claude"
+        already_mounted = any(v.split(":")[1] == claude_container for v in extra_volumes if ":" in v)
+        if not already_mounted:
+            extra_volumes.insert(0, f"{claude_host}:{claude_container}:ro")
+            print(f"Auto-detected claude (Linux ELF): {claude_host}", flush=True)
+    else:
+        print(f"Skipping host claude mount (not a Linux ELF — using image-bundled claude instead)", flush=True)
 else:
-    print("Warning: 'claude' not found on PATH — set claude_path in config.yaml", flush=True)
+    print("Warning: claude not found on host PATH — using image-bundled claude", flush=True)
 
 env = Environment(
     loader=FileSystemLoader(template_dir),
