@@ -39,11 +39,44 @@ if [[ "$DOCKER_MODE" == "true" ]]; then
   curl -fsSL -o ~/.aide/compose.yml.j2   "${RAW_BASE}/compose.yml.j2"
   chmod 755 ~/.aide/launchdocker.sh
 
+  # ── Detect claude binary ──────────────────────────────────────────────────
+  CLAUDE_HOST_PATH=""
+  CLAUDE_CONTAINER_PATH="/usr/local/bin/claude"
+  if CLAUDE_HOST_PATH=$(command -v claude 2>/dev/null); then
+    # Resolve symlinks so Docker gets the real file, not a broken link
+    if command -v realpath &>/dev/null; then
+      CLAUDE_HOST_PATH=$(realpath "$CLAUDE_HOST_PATH")
+    elif command -v readlink &>/dev/null; then
+      CLAUDE_HOST_PATH=$(readlink -f "$CLAUDE_HOST_PATH" 2>/dev/null || echo "$CLAUDE_HOST_PATH")
+    fi
+    echo "Detected claude: ${CLAUDE_HOST_PATH}"
+  else
+    echo "Warning: 'claude' not found on PATH — set claude_path manually in config.yaml"
+  fi
+
   if [[ ! -f ~/.aide/config.yaml ]]; then
     curl -fsSL -o ~/.aide/config.yaml "${RAW_BASE}/config.example.yaml"
+
+    # Patch claude_path with the detected binary path
+    if [[ -n "$CLAUDE_HOST_PATH" ]]; then
+      sed -i.bak "s|claude_path: claude|claude_path: ${CLAUDE_CONTAINER_PATH}|" ~/.aide/config.yaml
+      rm -f ~/.aide/config.yaml.bak
+    fi
+
+    # Inject claude volume mount into docker.volumes block
+    if [[ -n "$CLAUDE_HOST_PATH" ]]; then
+      sed -i.bak "s|  volumes: \[\]|  volumes:\n    - ${CLAUDE_HOST_PATH}:${CLAUDE_CONTAINER_PATH}:ro|" ~/.aide/config.yaml
+      rm -f ~/.aide/config.yaml.bak
+    fi
+
     echo "Created ~/.aide/config.yaml — fill in your credentials before starting"
   else
     echo "~/.aide/config.yaml already exists — not overwritten"
+    if [[ -n "$CLAUDE_HOST_PATH" ]]; then
+      echo "  Tip: add this to docker.volumes in config.yaml:"
+      echo "    - ${CLAUDE_HOST_PATH}:${CLAUDE_CONTAINER_PATH}:ro"
+      echo "  And set: claude_path: ${CLAUDE_CONTAINER_PATH}"
+    fi
   fi
 
   if [[ ! -f ~/.aide/tasks.yaml ]]; then
@@ -55,9 +88,9 @@ if [[ "$DOCKER_MODE" == "true" ]]; then
   echo ""
   echo "Next steps:"
   echo "  1. Edit ~/.aide/config.yaml — add your Webex/Telegram bot tokens"
-  echo "     and optionally set docker.volumes for extra mount points"
+  echo "     and optionally add more paths under docker.volumes"
   echo "  2. Start:   ~/.aide/launchdocker.sh"
-  echo "  3. Logs:    docker compose -f ~/.aide/compose.generated.yml logs -f"
+  echo "  3. Logs:    docker-compose -f ~/.aide/compose.generated.yml logs -f"
   echo "  4. Stop:    ~/.aide/launchdocker.sh --down"
   exit 0
 fi
