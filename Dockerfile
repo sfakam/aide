@@ -41,10 +41,17 @@ RUN npm install -g @anthropic-ai/claude-code
 
 # Non-root user. UID/GID default to 1000; match the host user so mounted
 # volume files have the correct ownership.
+# node:lts ships a 'node' user at UID/GID 1000 — rename it when the defaults
+# are used rather than creating a conflicting new user/group.
 ARG UID=1000
 ARG GID=1000
-RUN groupadd -g ${GID} aide \
- && useradd -u ${UID} -g aide -m -d /home/aide -s /bin/sh aide
+RUN if [ "${GID}" = "1000" ] && [ "${UID}" = "1000" ]; then \
+      groupmod -n aide node \
+   && usermod -l aide -d /home/aide -m -s /bin/sh node; \
+    else \
+      groupadd -g "${GID}" aide \
+   && useradd -u "${UID}" -g aide -m -d /home/aide -s /bin/sh aide; \
+    fi
 
 # Pre-create mount-point directories with correct ownership.
 RUN mkdir -p \
