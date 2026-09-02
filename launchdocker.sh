@@ -117,6 +117,14 @@ if extra_volumes:
         print(f"  {v}")
 PYEOF
 
+# ── Pre-create host-side mount source directories ────────────────────────────
+# Docker will error with "permission denied on chown" if a bind-mount source
+# does not exist. Create the dirs now so Docker never has to.
+mkdir -p \
+  "${HOME}/.aide" \
+  "${HOME}/.claude" \
+  "${HOME}/.local/share/claude"
+
 # ── Resolve docker compose command (v2 plugin vs v1 standalone) ──────────────
 if ! command -v docker &>/dev/null; then
   echo "Error: 'docker' not found on PATH." >&2
