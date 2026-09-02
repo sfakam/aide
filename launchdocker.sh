@@ -110,12 +110,40 @@ os.makedirs(os.path.dirname(output_path), exist_ok=True)
 with open(output_path, "w") as f:
     f.write(rendered)
 
+# Pre-create host-side paths for extra volumes so Docker does not
+# error with 'chown: permission denied' on missing directories.
+for v in extra_volumes:
+    host_path = v.split(":")[0]
+    if host_path and not os.path.exists(host_path):
+        os.makedirs(host_path, exist_ok=True)
+
 print(f"Rendered compose file: {output_path}")
 if extra_volumes:
     print(f"Extra volumes ({len(extra_volumes)}):")
     for v in extra_volumes:
         print(f"  {v}")
 PYEOF
+
+# ── Capture Claude/Anthropic auth vars into ~/.aide/.env ─────────────────────
+# Docker Compose reads this file automatically alongside the compose file.
+# Writing it here means non-interactive runs (launchd, cron) also work,
+# since ~/.zshrc / ~/.bash_profile are not sourced in those contexts.
+ENV_FILE="${HOME}/.aide/.env"
+{
+  for var in \
+    ANTHROPIC_API_KEY \
+    ANTHROPIC_FOUNDRY_API_KEY \
+    ANTHROPIC_FOUNDRY_BASE_URL \
+    ANTHROPIC_CUSTOM_HEADERS \
+    CLAUDE_CODE_USE_FOUNDRY \
+    CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING \
+    NODE_EXTRA_CA_CERTS; do
+    if [[ -n "${!var:-}" ]]; then
+      echo "${var}=${!var}"
+    fi
+  done
+} > "$ENV_FILE"
+chmod 600 "$ENV_FILE"
 
 # ── Pre-create host-side mount source directories ────────────────────────────
 # Docker will error with "permission denied on chown" if a bind-mount source
@@ -126,6 +154,7 @@ mkdir -p \
   "${HOME}/.local/share/claude" \
   "${HOME}/.claude-certs"
 
+
 # ── Resolve docker compose command (v2 plugin vs v1 standalone) ──────────────
 if ! command -v docker &>/dev/null; then
   echo "Error: 'docker' not found on PATH." >&2
@@ -134,9 +163,9 @@ if ! command -v docker &>/dev/null; then
 fi
 
 if docker compose version &>/dev/null 2>&1; then
-  COMPOSE_CMD=(docker compose -f "$OUTPUT")
+  COMPOSE_CMD=(docker compose -f "$OUTPUT" --env-file "$ENV_FILE")
 elif command -v docker-compose &>/dev/null; then
-  COMPOSE_CMD=(docker-compose -f "$OUTPUT")
+  COMPOSE_CMD=(docker-compose -f "$OUTPUT" --env-file "$ENV_FILE")
 else
   echo "Error: Docker Compose not found." >&2
   echo "  Docker Desktop (recommended): https://www.docker.com/products/docker-desktop/" >&2
