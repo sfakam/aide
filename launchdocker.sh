@@ -119,6 +119,25 @@ if claude_host:
 else:
     print("Warning: claude not found on host PATH — using image-bundled claude", flush=True)
 
+# Auto-detect NODE_EXTRA_CA_CERTS and mount the cert's actual parent directory.
+# The host cert may live anywhere; we always mount it at /home/aide/.claude-certs
+# inside the container so the remapped path in .env is predictable.
+ca_certs_env = os.environ.get('NODE_EXTRA_CA_CERTS', '')
+if ca_certs_env:
+    ca_host_path = os.path.expanduser(ca_certs_env)
+    if os.path.isfile(ca_host_path):
+        ca_host_dir = os.path.dirname(ca_host_path)
+        ca_container_dir = '/home/aide/.claude-certs'
+        already_mounted = any(
+            v.split(':')[1].rstrip('/') == ca_container_dir
+            for v in extra_volumes if ':' in v
+        )
+        if not already_mounted:
+            extra_volumes.append(f"{ca_host_dir}:{ca_container_dir}:ro")
+            print(f"Auto-detected CA cert: {ca_host_path}", flush=True)
+    else:
+        print(f"Warning: NODE_EXTRA_CA_CERTS='{ca_certs_env}' but file not found — SSL may fail", flush=True)
+
 env = Environment(
     loader=FileSystemLoader(template_dir),
     trim_blocks=True,
@@ -163,12 +182,17 @@ ENV_FILE="${HOME}/.aide/.env"
     ANTHROPIC_FOUNDRY_BASE_URL \
     ANTHROPIC_CUSTOM_HEADERS \
     CLAUDE_CODE_USE_FOUNDRY \
-    CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING \
-    NODE_EXTRA_CA_CERTS; do
+    CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING; do
     if [[ -n "${!var:-}" ]]; then
       echo "${var}=${!var}"
     fi
   done
+  # Remap NODE_EXTRA_CA_CERTS from the host path to the fixed container path so
+  # Docker Compose passes the correct in-container path to the aide process.
+  if [[ -n "${NODE_EXTRA_CA_CERTS:-}" ]]; then
+    CA_FILE=$(basename "$NODE_EXTRA_CA_CERTS")
+    echo "NODE_EXTRA_CA_CERTS=/home/aide/.claude-certs/${CA_FILE}"
+  fi
 } > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
@@ -178,8 +202,7 @@ chmod 600 "$ENV_FILE"
 mkdir -p \
   "${HOME}/.aide" \
   "${HOME}/.claude" \
-  "${HOME}/.local/share/claude" \
-  "${HOME}/.claude-certs"
+  "${HOME}/.local/share/claude"
 
 
 # ── Resolve docker compose command (v2 plugin vs v1 standalone) ──────────────
