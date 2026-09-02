@@ -15,6 +15,8 @@ services:
       - {{ home }}/.aide:/home/aide/.aide:rw
       - {{ home }}/.claude:/home/aide/.claude:ro
       - {{ home }}/.local/share/claude:/home/aide/.local/share/claude:ro
+      # claude-certs: CA chain for custom TLS endpoints (safe no-op if dir is empty)
+      - {{ home }}/.claude-certs:/home/aide/.claude-certs:ro
       {% if extra_volumes %}
       # ── Extra (from docker.volumes in config.yaml) ───────────────────────────
       {% for v in extra_volumes %}
@@ -24,6 +26,16 @@ services:
 
     environment:
       HOME: /home/aide
+      # ── Claude / Anthropic auth vars ─────────────────────────────────────────
+      # Passed through from the host shell environment if set; no-op if absent.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_USE_FOUNDRY: ${CLAUDE_CODE_USE_FOUNDRY:-}
+      ANTHROPIC_FOUNDRY_API_KEY: ${ANTHROPIC_FOUNDRY_API_KEY:-}
+      ANTHROPIC_FOUNDRY_BASE_URL: ${ANTHROPIC_FOUNDRY_BASE_URL:-}
+      ANTHROPIC_CUSTOM_HEADERS: ${ANTHROPIC_CUSTOM_HEADERS:-}
+      CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING: ${CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING:-}
+      # Remap cert path from host location to fixed container location
+      NODE_EXTRA_CA_CERTS: ${NODE_EXTRA_CA_CERTS:+/home/aide/.claude-certs/full_chain.pem}
 
     ports:
       - "127.0.0.1:9999:8080"

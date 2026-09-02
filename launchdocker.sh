@@ -123,7 +123,8 @@ PYEOF
 mkdir -p \
   "${HOME}/.aide" \
   "${HOME}/.claude" \
-  "${HOME}/.local/share/claude"
+  "${HOME}/.local/share/claude" \
+  "${HOME}/.claude-certs"
 
 # ── Resolve docker compose command (v2 plugin vs v1 standalone) ──────────────
 if ! command -v docker &>/dev/null; then
