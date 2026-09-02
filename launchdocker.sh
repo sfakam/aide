@@ -122,10 +122,18 @@ COMPOSE_CMD=(docker compose -f "$OUTPUT")
 
 if [[ "$MODE" == "down" ]]; then
   echo "Stopping aide container..."
-  "${COMPOSE_CMD[@]}" down ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+  if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+    "${COMPOSE_CMD[@]}" down "${EXTRA_ARGS[@]}"
+  else
+    "${COMPOSE_CMD[@]}" down
+  fi
 else
   echo "Starting aide container..."
-  "${COMPOSE_CMD[@]}" up -d $BUILD_FLAG ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+  if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+    "${COMPOSE_CMD[@]}" up -d $BUILD_FLAG "${EXTRA_ARGS[@]}"
+  else
+    "${COMPOSE_CMD[@]}" up -d $BUILD_FLAG
+  fi
   echo ""
   echo "Logs:  docker compose -f ${OUTPUT} logs -f"
   echo "Stop:  $0 --down"
