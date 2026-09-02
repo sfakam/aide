@@ -1,31 +1,32 @@
 #!/bin/sh
-# Runs as root. Installs any mounted custom CA certs, locates the claude binary,
-# then drops privileges to the aide user via gosu.
+# Runs as the aide user (set by USER directive in Dockerfile).
+# Builds a combined CA bundle if custom certs are mounted, then execs aide.
 set -e
 
-# ── Install custom CA certs ───────────────────────────────────────────────────
-# Certs mounted at /home/aide/.claude-certs are copied into the system CA store
-# so that both https (Node TLS) and fetch/undici (OpenSSL) trust them.
-# NODE_OPTIONS=--use-openssl-ca (set in compose) makes Node use this store.
+CLAUDE_VERSIONS=/home/aide/.local/share/claude/versions
+LOCAL_BIN=/home/aide/.local/bin
+COMBINED_CA=/home/aide/.aide/combined-ca.crt
+
+# ── Build combined CA bundle ───────────────────────────────────────────────────
+# Merge system CAs with any custom certs so that Node.js (both https and
+# fetch/undici) trusts them when launched with NODE_OPTIONS=--use-openssl-ca.
+# OpenSSL reads SSL_CERT_FILE; we export it before exec so aide + claude inherit it.
 CERT_DIR=/home/aide/.claude-certs
 if [ -d "$CERT_DIR" ]; then
-  changed=0
+  custom_count=0
   for cert in "$CERT_DIR"/*.pem "$CERT_DIR"/*.crt; do
-    [ -f "$cert" ] || continue
-    name=$(basename "$cert" | sed 's/\.[^.]*$/.crt/')
-    cp "$cert" "/usr/local/share/ca-certificates/${name}"
-    changed=1
+    [ -f "$cert" ] && custom_count=$((custom_count + 1))
   done
-  if [ "$changed" = "1" ]; then
-    update-ca-certificates >/dev/null 2>&1 || true
-    echo "aide: installed custom CA certs from ${CERT_DIR}"
+  if [ "$custom_count" -gt 0 ]; then
+    mkdir -p "$(dirname "$COMBINED_CA")"
+    cat /etc/ssl/certs/ca-certificates.crt "$CERT_DIR"/*.pem "$CERT_DIR"/*.crt \
+        2>/dev/null > "$COMBINED_CA" || true
+    export SSL_CERT_FILE="$COMBINED_CA"
+    echo "aide: combined CA bundle (${custom_count} custom cert(s)) -> ${COMBINED_CA}"
   fi
 fi
 
-# ── Locate the claude binary ──────────────────────────────────────────────────
-CLAUDE_VERSIONS=/home/aide/.local/share/claude/versions
-LOCAL_BIN=/home/aide/.local/bin
-
+# ── Locate the claude binary ───────────────────────────────────────────────────
 if command -v claude > /dev/null 2>&1; then
   echo "aide: using claude at $(command -v claude)"
 elif [ -d "$CLAUDE_VERSIONS" ]; then
@@ -33,7 +34,6 @@ elif [ -d "$CLAUDE_VERSIONS" ]; then
   if [ -n "$LATEST" ]; then
     mkdir -p "$LOCAL_BIN"
     ln -sf "${CLAUDE_VERSIONS}/${LATEST}" "${LOCAL_BIN}/claude"
-    chown aide:aide "$LOCAL_BIN/claude" 2>/dev/null || true
     echo "aide: using claude ${LATEST}"
   else
     echo "aide: warning — no claude binary found in ${CLAUDE_VERSIONS}" >&2
@@ -42,5 +42,4 @@ else
   echo "aide: warning — claude not found; set claude_path in config.yaml" >&2
 fi
 
-# ── Drop to aide user ─────────────────────────────────────────────────────────
-exec gosu aide "$@"
+exec "$@"
