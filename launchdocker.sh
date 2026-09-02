@@ -49,25 +49,25 @@ if [[ ! -f "$TEMPLATE" ]]; then
   exit 1
 fi
 
+# ── Resolve Python interpreter ────────────────────────────────────────────────
+# Prefer uv (ephemeral env, works on macOS without touching system Python).
+# Fall back to a dedicated venv at ~/.aide/.venv.
+VENV="${HOME}/.aide/.venv"
+
+if command -v uv &>/dev/null; then
+  PYTHON=(uv run --quiet --with PyYAML --with jinja2 python3 -)
+else
+  if [[ ! -d "$VENV" ]]; then
+    echo "Creating Python venv at ${VENV}..."
+    python3 -m venv "$VENV"
+    "$VENV/bin/pip" install --quiet PyYAML jinja2
+  fi
+  PYTHON=("$VENV/bin/python" -)
+fi
+
 # ── Render the Jinja2 template via an inline Python script ────────────────────
-python3 - <<PYEOF
-import sys, os, subprocess
-
-# Ensure PyYAML and Jinja2 are available; install into user site if missing.
-def ensure(pkg, import_name=None):
-    import_name = import_name or pkg
-    try:
-        __import__(import_name)
-    except ImportError:
-        print(f"Installing {pkg}...", flush=True)
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--quiet", "--user", pkg]
-        )
-
-ensure("PyYAML", "yaml")
-ensure("Jinja2", "jinja2")
-
-import yaml
+"${PYTHON[@]}" <<PYEOF
+import os, yaml
 from jinja2 import Environment, FileSystemLoader
 
 config_path   = os.path.expanduser("${CONFIG}")
