@@ -22,18 +22,26 @@ services:
       {% endfor %}
       {% endif %}
 
+    # env_file passes vars directly to the container without compose interpolation.
+    # NODE_EXTRA_CA_CERTS is written here with the container path by launchdocker.sh.
+    env_file:
+      - {{ home }}/.aide/.env
+
     environment:
       HOME: /home/aide
       # ── Claude / Anthropic auth vars ─────────────────────────────────────────
       # Passed through from the host shell environment if set; no-op if absent.
+      # Note: compose interpolation (${VAR:-}) uses the host shell env, which is
+      # correct for these vars since their values are the same on host and container.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_USE_FOUNDRY: ${CLAUDE_CODE_USE_FOUNDRY:-}
       ANTHROPIC_FOUNDRY_API_KEY: ${ANTHROPIC_FOUNDRY_API_KEY:-}
       ANTHROPIC_FOUNDRY_BASE_URL: ${ANTHROPIC_FOUNDRY_BASE_URL:-}
       ANTHROPIC_CUSTOM_HEADERS: ${ANTHROPIC_CUSTOM_HEADERS:-}
       CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING: ${CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING:-}
-      # Container path already remapped by launchdocker.sh in .env
-      NODE_EXTRA_CA_CERTS: ${NODE_EXTRA_CA_CERTS:-}
+      # NODE_EXTRA_CA_CERTS is intentionally NOT here — it comes from env_file above
+      # with the container-remapped path. Putting it here would let the host shell
+      # path override the remapped value via compose interpolation.
 
     ports:
       - "127.0.0.1:9999:8080"
