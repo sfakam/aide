@@ -162,6 +162,6 @@ else
     "${COMPOSE_CMD[@]}" up -d $BUILD_FLAG
   fi
   echo ""
-  echo "Logs:  docker compose -f ${OUTPUT} logs -f"
+  echo "Logs:  ${COMPOSE_CMD[*]} logs -f"
   echo "Stop:  $0 --down"
 fi
