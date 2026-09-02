@@ -117,8 +117,15 @@ if extra_volumes:
         print(f"  {v}")
 PYEOF
 
-# ── Run docker compose ────────────────────────────────────────────────────────
-COMPOSE_CMD=(docker compose -f "$OUTPUT")
+# ── Resolve docker compose command (v2 plugin vs v1 standalone) ──────────────
+if docker compose version &>/dev/null 2>&1; then
+  COMPOSE_CMD=(docker compose -f "$OUTPUT")
+elif command -v docker-compose &>/dev/null; then
+  COMPOSE_CMD=(docker-compose -f "$OUTPUT")
+else
+  echo "Error: neither 'docker compose' nor 'docker-compose' found on PATH." >&2
+  exit 1
+fi
 
 if [[ "$MODE" == "down" ]]; then
   echo "Stopping aide container..."
