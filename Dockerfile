@@ -33,7 +33,7 @@ FROM node:lts-bookworm-slim AS runtime
 
 # System packages — own layer, changes at most when Debian packages update.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates gosu \
+ && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # Claude Code — own layer so a code-only aide rebuild does not re-pull claude.

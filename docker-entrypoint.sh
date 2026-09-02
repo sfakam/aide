@@ -43,4 +43,4 @@ else
 fi
 
 # ── Drop to aide user ─────────────────────────────────────────────────────────
-exec gosu aide "$@"
+exec runuser -u aide -- "$@"
