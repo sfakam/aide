@@ -118,12 +118,24 @@ if extra_volumes:
 PYEOF
 
 # ── Resolve docker compose command (v2 plugin vs v1 standalone) ──────────────
+if ! command -v docker &>/dev/null; then
+  echo "Error: 'docker' not found on PATH." >&2
+  echo "  Install Docker Desktop: https://www.docker.com/products/docker-desktop/" >&2
+  exit 1
+fi
+
 if docker compose version &>/dev/null 2>&1; then
   COMPOSE_CMD=(docker compose -f "$OUTPUT")
 elif command -v docker-compose &>/dev/null; then
   COMPOSE_CMD=(docker-compose -f "$OUTPUT")
 else
-  echo "Error: neither 'docker compose' nor 'docker-compose' found on PATH." >&2
+  echo "Error: Docker Compose not found." >&2
+  echo "  Docker Desktop (recommended): https://www.docker.com/products/docker-desktop/" >&2
+  echo "  Or install Compose standalone: brew install docker-compose" >&2
+  echo ""
+  echo "  'docker' was found but 'docker compose' is not available." >&2
+  echo "  If you installed docker via 'brew install docker' you only got the CLI —" >&2
+  echo "  you also need a container runtime (Docker Desktop, OrbStack, or Colima)." >&2
   exit 1
 fi
 
