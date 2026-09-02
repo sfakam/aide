@@ -92,6 +92,22 @@ for v in raw_volumes:
     parts[0] = os.path.expanduser(parts[0])
     extra_volumes.append(":".join(parts))
 
+# Auto-detect the claude binary on the host and inject it as a volume mount
+# so the container always has it, regardless of config.yaml.
+import shutil
+claude_host = shutil.which("claude")
+if claude_host:
+    claude_host = os.path.realpath(claude_host)  # resolve symlinks
+    claude_container = "/usr/local/bin/claude"
+    claude_mount = f"{claude_host}:{claude_container}:ro"
+    # Only add if the container path isn't already covered by extra_volumes
+    already_mounted = any(v.split(":")[1] == claude_container for v in extra_volumes if ":" in v)
+    if not already_mounted:
+        extra_volumes.insert(0, claude_mount)
+        print(f"Auto-detected claude: {claude_host}", flush=True)
+else:
+    print("Warning: 'claude' not found on PATH — set claude_path in config.yaml", flush=True)
+
 env = Environment(
     loader=FileSystemLoader(template_dir),
     trim_blocks=True,
