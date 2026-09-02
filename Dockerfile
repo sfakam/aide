@@ -31,6 +31,10 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 
 FROM node:lts-bookworm-slim AS runtime
 
+# gosu — tiny privilege-drop helper; sourced directly from its official image
+# so no extra apt packages are needed.
+COPY --from=tianon/gosu:1.17 /usr/local/bin/gosu /usr/local/bin/gosu
+
 # System packages — own layer, changes at most when Debian packages update.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
