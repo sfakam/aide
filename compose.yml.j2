@@ -29,6 +29,9 @@ services:
 
     environment:
       HOME: /home/aide
+      # Makes Node.js (https + fetch/undici) use OpenSSL's CA store, which
+      # includes any certs the entrypoint installed from .claude-certs.
+      NODE_OPTIONS: "--use-openssl-ca"
       # ── Claude / Anthropic auth vars ─────────────────────────────────────────
       # Passed through from the host shell environment if set; no-op if absent.
       # Note: compose interpolation (${VAR:-}) uses the host shell env, which is

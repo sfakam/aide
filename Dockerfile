@@ -33,7 +33,7 @@ FROM node:lts-bookworm-slim AS runtime
 
 # System packages — own layer, changes at most when Debian packages update.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates gosu \
  && rm -rf /var/lib/apt/lists/*
 
 # Claude Code — own layer so a code-only aide rebuild does not re-pull claude.
@@ -62,7 +62,6 @@ RUN chmod 755 /usr/local/bin/aide
 COPY --chown=root:root docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 
-USER aide
 ENV HOME=/home/aide
 ENV PATH=/home/aide/.local/bin:/usr/local/bin:/usr/bin:/bin
 
