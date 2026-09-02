@@ -26,10 +26,19 @@ services:
       HOME: /home/aide
 
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9999:8080"
 
     cap_drop:
       - ALL
 
     security_opt:
       - no-new-privileges:true
+    networks:
+      - aide
+
+networks:
+  aide:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.99.0/24

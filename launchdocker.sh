@@ -14,12 +14,19 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATE="${SCRIPT_DIR}/compose.yml.j2"
 CONFIG="${HOME}/.aide/config.yaml"
 OUTPUT="${HOME}/.aide/compose.generated.yml"
 BUILD_FLAG=""
 MODE="up"
 EXTRA_ARGS=()
+
+# Template search order: ~/.aide/ first (installed via install.sh --docker),
+# then the script's own directory (repo clone).
+if [[ -f "${HOME}/.aide/compose.yml.j2" ]]; then
+  TEMPLATE="${HOME}/.aide/compose.yml.j2"
+else
+  TEMPLATE="${SCRIPT_DIR}/compose.yml.j2"
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -63,10 +70,11 @@ ensure("Jinja2", "jinja2")
 import yaml
 from jinja2 import Environment, FileSystemLoader
 
-config_path  = os.path.expanduser("${CONFIG}")
-template_dir = "${SCRIPT_DIR}"
-template_file = "compose.yml.j2"
-output_path  = os.path.expanduser("${OUTPUT}")
+config_path   = os.path.expanduser("${CONFIG}")
+template_path = os.path.expanduser("${TEMPLATE}")
+template_dir  = os.path.dirname(template_path)
+template_file = os.path.basename(template_path)
+output_path   = os.path.expanduser("${OUTPUT}")
 
 with open(config_path) as f:
     cfg = yaml.safe_load(f) or {}

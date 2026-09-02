@@ -10,21 +10,57 @@ REPO="sfakam/aide"
 BINARY="aide"
 INSTALL_DIR="/usr/local/bin"
 SETUP_SERVICE=false
+DOCKER_MODE=false
 PINNED_VERSION=""
 
 # ── Parse flags ───────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --service)   SETUP_SERVICE=true; shift ;;
+    --docker)    DOCKER_MODE=true; shift ;;
     --version)   PINNED_VERSION="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: install.sh [--service] [--version vX.Y.Z]"
-      echo "  --service   Also install and enable the system service after install"
+      echo "Usage: install.sh [--service] [--docker] [--version vX.Y.Z]"
+      echo "  --service   Install native binary + system service (systemd/launchd)"
+      echo "  --docker    Install Docker launcher (launchdocker.sh + template) — no binary"
       echo "  --version   Install a specific release tag (default: latest)"
       exit 0 ;;
     *) echo "Unknown flag: $1" >&2; exit 1 ;;
   esac
 done
+
+# ── Docker mode — download launcher + template, skip native binary ────────────
+if [[ "$DOCKER_MODE" == "true" ]]; then
+  RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
+  mkdir -p ~/.aide
+
+  echo "Downloading launchdocker.sh and compose.yml.j2..."
+  curl -fsSL -o ~/.aide/launchdocker.sh  "${RAW_BASE}/launchdocker.sh"
+  curl -fsSL -o ~/.aide/compose.yml.j2   "${RAW_BASE}/compose.yml.j2"
+  chmod 755 ~/.aide/launchdocker.sh
+
+  if [[ ! -f ~/.aide/config.yaml ]]; then
+    curl -fsSL -o ~/.aide/config.yaml "${RAW_BASE}/config.example.yaml"
+    echo "Created ~/.aide/config.yaml — fill in your credentials before starting"
+  else
+    echo "~/.aide/config.yaml already exists — not overwritten"
+  fi
+
+  if [[ ! -f ~/.aide/tasks.yaml ]]; then
+    curl -fsSL -o ~/.aide/tasks.yaml "${RAW_BASE}/tasks.example.yaml"
+  fi
+
+  echo ""
+  echo "aide Docker installer ready."
+  echo ""
+  echo "Next steps:"
+  echo "  1. Edit ~/.aide/config.yaml — add your Webex/Telegram bot tokens"
+  echo "     and optionally set docker.volumes for extra mount points"
+  echo "  2. Start:   ~/.aide/launchdocker.sh"
+  echo "  3. Logs:    docker compose -f ~/.aide/compose.generated.yml logs -f"
+  echo "  4. Stop:    ~/.aide/launchdocker.sh --down"
+  exit 0
+fi
 
 # ── Detect platform ───────────────────────────────────────────────────────────
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
