@@ -196,13 +196,13 @@ func (r *Router) engaged(wiringIndex int, w config.Wiring, msg channels.InboundM
 	if len(w.AllowedUsers) > 0 {
 		allowed := false
 		for _, u := range w.AllowedUsers {
-			if strings.EqualFold(u, msg.SenderName) {
+			if u == msg.SenderID || strings.EqualFold(u, msg.SenderName) {
 				allowed = true
 				break
 			}
 		}
 		if !allowed {
-			slog.Debug("sender not in allowed_users", "sender", msg.SenderName)
+			slog.Debug("sender not in allowed_users", "sender", msg.SenderName, "sender_id", msg.SenderID)
 			return false
 		}
 	}

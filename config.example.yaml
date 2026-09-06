@@ -46,10 +46,13 @@ docker:
 
 wirings:
   # Every Telegram message → assistant, one session per user
+  # allowed_users: use numeric Telegram user IDs (find yours by messaging @userinfobot)
   - channel_id: my-telegram
     worker_id: assistant
     engage_mode: always
     session_mode: per-user
+    allowed_users:
+      - "123456789"   # your Telegram user ID
 
   # Webex: only respond when @mentioned, whole room shares one session
   - channel_id: my-webex
