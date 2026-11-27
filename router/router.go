@@ -21,22 +21,37 @@ type Worker interface {
 
 // Router evaluates wiring configuration and routes inbound messages to workers.
 type Router struct {
-	cfg      *config.Config
+	mu       sync.RWMutex
+	cfg      *config.Config            // protected by mu
+	patterns map[string]*regexp.Regexp // protected by mu; wiring index → compiled regex
 	manager  Worker
-	channels map[string]channels.Channel // channelID → Channel (for sending replies)
-	patterns map[string]*regexp.Regexp   // wiring index → compiled regex
+	channels map[string]channels.Channel // channelID → Channel (for sending replies); immutable after New
 }
 
 // New creates a Router.
 // chs is the map of running channel adapters (used to send replies).
 func New(cfg *config.Config, manager Worker, chs map[string]channels.Channel) *Router {
-	r := &Router{
+	return &Router{
 		cfg:      cfg,
+		patterns: compilePatterns(cfg),
 		manager:  manager,
 		channels: chs,
-		patterns: make(map[string]*regexp.Regexp),
 	}
-	// Pre-compile patterns
+}
+
+// Reload swaps in a new config without restarting. Only wirings are hot-reloaded;
+// channel and worker changes require a restart.
+func (r *Router) Reload(cfg *config.Config) {
+	patterns := compilePatterns(cfg)
+	r.mu.Lock()
+	r.cfg = cfg
+	r.patterns = patterns
+	r.mu.Unlock()
+	slog.Info("config hot-reloaded", "wirings", len(cfg.Wirings))
+}
+
+func compilePatterns(cfg *config.Config) map[string]*regexp.Regexp {
+	patterns := make(map[string]*regexp.Regexp)
 	for i, w := range cfg.Wirings {
 		if w.EngageMode == "pattern" && w.EngagePattern != "" {
 			key := fmt.Sprintf("%d", i)
@@ -45,15 +60,21 @@ func New(cfg *config.Config, manager Worker, chs map[string]channels.Channel) *R
 				slog.Warn("invalid engage_pattern", "wiring", i, "err", err)
 				continue
 			}
-			r.patterns[key] = re
+			patterns[key] = re
 		}
 	}
-	return r
+	return patterns
 }
 
 // Dispatch evaluates all wirings for msg's channel and routes to matching workers in parallel.
 func (r *Router) Dispatch(ctx context.Context, msg channels.InboundMessage) {
-	wirings := r.cfg.WiringsForChannel(msg.ChannelID)
+	// Snapshot under read lock so a concurrent Reload doesn't race with this dispatch.
+	r.mu.RLock()
+	cfg := r.cfg
+	patterns := r.patterns
+	r.mu.RUnlock()
+
+	wirings := cfg.WiringsForChannel(msg.ChannelID)
 	if len(wirings) == 0 {
 		slog.Debug("no wirings for channel", "channel", msg.ChannelID)
 		return
@@ -70,7 +91,7 @@ func (r *Router) Dispatch(ctx context.Context, msg channels.InboundMessage) {
 
 	var wg sync.WaitGroup
 	for i, w := range wirings {
-		if !r.engaged(i, w, msg) {
+		if !engaged(i, w, msg, patterns) {
 			slog.Debug("wiring skipped",
 				"worker", w.WorkerID,
 				"engage_mode", w.EngageMode,
@@ -192,7 +213,7 @@ func keepTyping(ctx context.Context, tc channels.TypingChannel, roomID string) {
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
 // engaged returns true if the wiring should handle this message.
-func (r *Router) engaged(wiringIndex int, w config.Wiring, msg channels.InboundMessage) bool {
+func engaged(wiringIndex int, w config.Wiring, msg channels.InboundMessage, patterns map[string]*regexp.Regexp) bool {
 	if len(w.AllowedUsers) > 0 {
 		allowed := false
 		for _, u := range w.AllowedUsers {
@@ -213,7 +234,7 @@ func (r *Router) engaged(wiringIndex int, w config.Wiring, msg channels.InboundM
 		return msg.IsMention
 	case "pattern":
 		key := fmt.Sprintf("%d", wiringIndex)
-		re, ok := r.patterns[key]
+		re, ok := patterns[key]
 		if !ok {
 			return false
 		}

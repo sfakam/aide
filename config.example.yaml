@@ -3,8 +3,9 @@
 
 claude_path: claude                        # path to claude CLI binary
 work_dir: ~/.aide                       # base directory for all session subdirs
-db_path: ~/.aide/aide.db             # SQLite cursor persistence
+db_path: ~/.aide/aide.db             # SQLite cursor + agent session persistence
 tasks_path: ~/.aide/tasks.yaml             # scheduled tasks file (optional)
+agents_socket_path: ~/.aide/agents.sock    # unix socket for the aide-agents HTTP API
 
 channels:
   - id: my-telegram
@@ -33,6 +34,36 @@ workers:
   - id: coder
     work_dir: ~/.aide/sessions/coder
     session_timeout_minutes: 120
+
+# aide-agents: external, custom-built processes that call the unix-socket API
+# for Claude inference and (optionally) channel relay. See aide-agents repo's
+# docs/design.md for the full protocol. Omit this section entirely if you
+# don't have any agents yet.
+agents:
+  - id: disk-usage-watcher
+    token: "your-disk-usage-watcher-token"     # bearer token the agent must present
+    models_allowed: ["claude-sonnet-5", "claude-haiku-4-5"]
+    default_model: "claude-sonnet-5"
+    effort_allowed: ["low", "medium"]
+    default_effort: "low"
+    rate_limit:
+      max_requests: 20
+      window_minutes: 60
+    max_turns_per_session: 50
+    max_session_duration_minutes: 480
+    idle_timeout_minutes: 1440
+    # Omit channels_allowed entirely if this agent never calls /messages —
+    # e.g. because it posts to Webex/Telegram directly with its own bot token.
+    channels_allowed:
+      - channel_id: my-webex
+        room_ids: ["Y2lzY29zcGFyazovL3VzL1JPT00vexample"]
+
+  # Token here is what the long-lived process passes to POST /heartbeat.
+  # See tasks.example.yaml's "queue-poller" entry (type: agent,
+  # agent_mode: supervised) — its agent_id must match this id.
+  - id: queue-poller
+    token: "your-queue-poller-token"
+    default_model: "claude-haiku-4-5"
 
 # Docker-specific settings — only used by launchdocker.sh, ignored by aide itself.
 # Lists extra bind-mounts to inject into the generated compose file.

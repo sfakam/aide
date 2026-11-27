@@ -1,103 +1,129 @@
-# aide
+# AIde
 
-A lightweight daemon that connects Claude Code to Webex and Telegram as a persistent bot.
-
-Messages arrive via polling, are routed to a Claude Code session, and the response is posted back. Sessions persist across messages so Claude retains conversation context.
+**AI**de — an AI-powered aide daemon that connects Claude Code to Webex and Telegram as a persistent bot. Messages are routed to Claude workers and responses are posted back. Sessions persist across messages so Claude retains conversation context.
 
 ## Features
 
-- **Webex and Telegram** channel support
+- **Webex and Telegram** channel support with typing indicators
 - **Multiple workers** — route different channels or patterns to separate Claude instances
-- **Scheduled tasks** — cron-style prompts sent to Claude on a schedule
+- **Flexible routing** — `always`, `mention`, or regex `pattern` engage modes; per-user, shared, or worker-shared sessions
+- **Scheduled tasks** — cron-style jobs with two types:
+  - `type: ai` — sends a prompt to Claude and posts the response
+  - `type: script` — runs a shell command and posts stdout (no Claude involved)
+- **Pre/post scripts** — shell commands that run before/after the main action; pre-script must exit 0 or the main action is skipped
+- **Adaptive Cards** — Webex task notifications (start, result, errors) are posted as rich Adaptive Cards
+- **Hot reload** — edits to `config.yaml` and `tasks.yaml` take effect within 10 seconds; no restart needed
 - **Session persistence** — conversations survive restarts via `--continue`
-- **Docker support** — runs containerised with minimal host access
 
-## Installation
+---
 
-### Native binary (Linux / macOS)
+## Quickstart
 
-```bash
-# Install binary only
-curl -fsSL https://raw.githubusercontent.com/sfakam/aide/main/install.sh | bash
-
-# Install binary + system service (auto-starts on login)
-curl -fsSL https://raw.githubusercontent.com/sfakam/aide/main/install.sh | bash -s -- --service
-```
-
-### Docker (recommended for macOS)
+**Requires:** Go 1.22+, Claude Code installed and authenticated.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sfakam/aide/main/install.sh | bash -s -- --docker
+git clone https://github.com/sfakam/aide.git
+cd aide
 ```
 
-This downloads `launchdocker.sh` and the compose template to `~/.aide/`. The container image is pulled from GHCR — no local build needed.
+Then open Claude Code in this directory and run:
 
-## Configuration
-
-Edit `~/.aide/config.yaml` (created automatically during install):
-
-```yaml
-claude_path: claude          # path to the claude CLI binary
-
-channels:
-  - id: my-webex
-    type: webex
-    bot_token: "YOUR_BOT_TOKEN"
-    room_id: "ROOM_ID"
-    poll_interval_secs: 30
-
-workers:
-  - id: assistant
-    session_timeout_minutes: 60
-
-wirings:
-  - channel_id: my-webex
-    worker_id: assistant
-    engage_mode: always
-    session_mode: shared
+```
+/aidectl
 ```
 
-See [`config.example.yaml`](config.example.yaml) for all options including Telegram, per-user sessions, pattern routing, and scheduled tasks.
+The `/aidectl` skill walks you through the full setup interactively — OS detection, building, service installation, bot creation, config, and tasks. It is the recommended entry point for all setup and configuration.
 
-### Extra Docker mounts
+---
 
-Add a `docker.volumes` section to mount additional host directories into the container:
+## /aidectl Skill
 
-```yaml
-docker:
-  volumes:
-    - ~/.certs:/home/aide/.certs:ro
-    - ~/git:/home/aide/git:rw
+AIde ships with a Claude Code skill for interactive setup, config, and task management. It is loaded automatically when you open this repo in Claude Code (no plugin registration needed — `.claude/skills/` is discovered automatically).
+
+**Invoke with:**
+```
+/aidectl
 ```
 
-## Running
+**What it covers:**
 
-**Native — Linux (systemd)**
+| Area | Description |
+|---|---|
+| Initial setup | Detects OS, runs `make service` (Linux/systemd) or `make service-macos` (macOS/launchd) |
+| Config | Channels, workers, wirings, engage modes, session modes |
+| Bot setup | Creating Webex and Telegram bots, finding room IDs |
+| Tasks | AI tasks, script tasks, pre/post scripts, schedules |
+| Troubleshooting | Common issues with channels, tasks, and service management |
+
+The skill is defined in [`.claude/skills/aidectl/SKILL.md`](.claude/skills/aidectl/SKILL.md).
+
+---
+
+## Manual Setup Reference
+
+If you prefer to set up AIde without the skill:
+
+### Build + install service
+
+```bash
+make service          # Linux  — builds, installs to /usr/local/bin, sets up systemd user service
+make service-macos    # macOS  — builds, installs to /usr/local/bin, sets up launchd user agent
+```
+
+Both targets are idempotent and create `~/.aide/config.yaml` and `~/.aide/tasks.yaml` from the bundled examples (never overwrites existing files).
+
+### Edit config
+
+```bash
+$EDITOR ~/.aide/config.yaml
+$EDITOR ~/.aide/tasks.yaml   # optional — for scheduled tasks
+```
+
+See [`config.example.yaml`](config.example.yaml) and [`tasks.example.yaml`](tasks.example.yaml) for the full reference.
+
+### Start the service
+
+**Linux**
 ```bash
 systemctl --user start aide
 journalctl --user -fu aide
 ```
 
-**Native — macOS (launchd)**
+**macOS**
 ```bash
 launchctl start local.aide
 tail -f /tmp/aide.err
 ```
 
-**Docker**
+### Service management
+
+| Action | Linux | macOS |
+|---|---|---|
+| Start | `systemctl --user start aide` | `launchctl start local.aide` |
+| Stop | `systemctl --user stop aide` | `launchctl stop local.aide` |
+| Restart | `systemctl --user restart aide` | `launchctl stop local.aide && launchctl start local.aide` |
+| Logs | `journalctl --user -fu aide` | `tail -f /tmp/aide.err` |
+| Status | `systemctl --user status aide` | `launchctl list \| grep aide` |
+
+---
+
+## Other Make targets
+
 ```bash
-~/.aide/launchdocker.sh          # start
-~/.aide/launchdocker.sh --down   # stop
-~/.aide/launchdocker.sh --build  # rebuild image from source
-docker compose -f ~/.aide/compose.generated.yml logs -f
-```
-
-## Building from source
-
-Requires Go 1.22+.
-
-```bash
-make build      # build ./aide binary
+make build      # build ./aide binary only
 make install    # install to /usr/local/bin/aide
 make test       # run tests
+make clean      # remove binary
 ```
+
+**Manual run (dev):**
+```bash
+./aide --config config.yaml --log-level debug
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--config` | `config.yaml` | Config file path |
+| `--db` | `aide.db` | SQLite database path |
+| `--api` | `:8080` | REST API address (empty to disable) |
+| `--log-level` | `info` | `debug`, `info`, `warn`, `error` |

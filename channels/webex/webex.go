@@ -2,6 +2,7 @@
 package webex
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -169,6 +170,49 @@ func (c *Channel) sendOne(ctx context.Context, roomID, text string) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("webex sendMessage HTTP %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
+// SendCard posts an Adaptive Card to roomID.
+// fallback is shown to clients that don't render cards (e.g. mobile notifications).
+// Implements channels.CardChannel.
+func (c *Channel) SendCard(ctx context.Context, roomID string, card channels.AdaptiveCard, fallback string) error {
+	type attachment struct {
+		ContentType string              `json:"contentType"`
+		Content     channels.AdaptiveCard `json:"content"`
+	}
+	type payload struct {
+		RoomID      string       `json:"roomId"`
+		Text        string       `json:"text"`
+		Attachments []attachment `json:"attachments"`
+	}
+	p := payload{
+		RoomID: roomID,
+		Text:   fallback,
+		Attachments: []attachment{{
+			ContentType: "application/vnd.microsoft.card.adaptive",
+			Content:     card,
+		}},
+	}
+	body, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBase+"/messages", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("webex sendCard HTTP %d: %s", resp.StatusCode, b)
 	}
 	return nil
 }

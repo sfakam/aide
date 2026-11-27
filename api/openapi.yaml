@@ -9,7 +9,7 @@ info:
   version: 0.1.0
   contact:
     name: aide
-    url: https://github.com/sfathall/aide
+    url: https://github.com/sfakam/aide
 
 servers:
   - url: http://localhost:8080

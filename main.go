@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sfathall/aide/agent"
 	"github.com/sfathall/aide/api"
 	"github.com/sfathall/aide/channels"
 	"github.com/sfathall/aide/channels/telegram"
@@ -24,9 +25,9 @@ var version = "dev"
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
-	dbPath     := flag.String("db", "aide.db", "path to SQLite database")
-	apiAddr    := flag.String("api", ":8080", "API listen address (empty to disable)")
-	logLevel   := flag.String("log-level", "info", "log level: debug, info, warn, error")
+	dbPath := flag.String("db", "aide.db", "path to SQLite database")
+	apiAddr := flag.String("api", ":8080", "API listen address (empty to disable)")
+	logLevel := flag.String("log-level", "info", "log level: debug, info, warn, error")
 	flag.Parse()
 
 	// Configure structured logger
@@ -81,22 +82,39 @@ func main() {
 	// Build router
 	rt := router.New(cfg, fanout, chs)
 
+	// aide-agents: unix-socket-only HTTP API for external agent processes.
+	// See aide-agents/docs/design.md for the protocol this implements.
+	// hb is shared with the scheduler below so supervised agent tasks (type:
+	// agent, agent_mode: supervised) can detect a stuck process via its
+	// /heartbeat calls, not just whether the OS process has exited.
+	hb := agent.NewHeartbeatTracker()
+	agentSrv := agent.New(cfg.AgentsSocketPath, cfg, db, cfg.ClaudePath, chs, hb)
+	go func() {
+		if err := agentSrv.Start(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("agent API stopped", "err", err)
+		}
+	}()
+	slog.Info("agent API listening", "socket", cfg.AgentsSocketPath)
+
 	// Load and schedule tasks
 	taskCfg, err := tasks.Load(cfg.TasksPath)
 	if err != nil {
 		slog.Error("failed to load tasks", "err", err)
 		os.Exit(1)
 	}
-	sched := newScheduler(fanout, chs)
+	sched := newScheduler(ctx, fanout, chs, hb)
 	for _, t := range taskCfg.EnabledTasks() {
 		if err := sched.add(t); err != nil {
 			slog.Error("failed to schedule task", "task", t.ID, "schedule", t.Schedule, "err", err)
 			os.Exit(1)
 		}
-		slog.Info("task scheduled", "task", t.ID, "name", t.Name, "schedule", t.Schedule)
+		slog.Info("task scheduled", "task", t.ID, "name", t.Name, "type", t.Type, "schedule", t.Schedule)
 	}
 	sched.start()
 	defer sched.stop()
+
+	// Hot-reload watcher: polls config and tasks files every 10s
+	go watchFiles(ctx, *configPath, cfg.TasksPath, sched, 10*time.Second, rt, agentSrv)
 
 	// Inbound message bus
 	inbound := make(chan channels.InboundMessage, 64)

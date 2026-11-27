@@ -257,3 +257,128 @@ func TestSessionKey(t *testing.T) {
 		}
 	}
 }
+
+// ─── type: agent ────────────────────────────────────────────────────────────
+
+func TestLoad_agent_scheduled_valid(t *testing.T) {
+	path := writeYAML(t, `
+tasks:
+  - id: watcher
+    type: agent
+    agent_mode: scheduled
+    enabled: true
+    schedule: "@hourly"
+    cmd:
+      name: disk-usage-watcher
+      cmd: "python3 /opt/agents/disk_usage_watcher.py"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	task := cfg.Tasks[0]
+	if task.Outputs != nil {
+		t.Errorf("expected outputs to be optional and unset, got %v", task.Outputs)
+	}
+}
+
+func TestLoad_agent_supervised_valid(t *testing.T) {
+	path := writeYAML(t, `
+tasks:
+  - id: poller
+    type: agent
+    agent_mode: supervised
+    enabled: true
+    agent_id: disk-usage-watcher
+    heartbeat_timeout_secs: 120
+    cmd:
+      name: poller
+      cmd: "python3 /opt/agents/poller.py"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	task := cfg.Tasks[0]
+	if task.RestartBackoffSecs != 5 {
+		t.Errorf("expected default restart_backoff_secs=5, got %d", task.RestartBackoffSecs)
+	}
+	if task.MaxRestartBackoffSecs != 60 {
+		t.Errorf("expected default max_restart_backoff_secs=60, got %d", task.MaxRestartBackoffSecs)
+	}
+}
+
+func TestLoad_agent_supervised_rejects_schedule(t *testing.T) {
+	path := writeYAML(t, `
+tasks:
+  - id: poller
+    type: agent
+    agent_mode: supervised
+    schedule: "@hourly"
+    cmd:
+      name: poller
+      cmd: "true"
+`)
+	if _, err := Load(path); err == nil {
+		t.Error("expected error for supervised agent with a schedule")
+	}
+}
+
+func TestLoad_agent_scheduled_requires_schedule(t *testing.T) {
+	path := writeYAML(t, `
+tasks:
+  - id: watcher
+    type: agent
+    agent_mode: scheduled
+    cmd:
+      name: watcher
+      cmd: "true"
+`)
+	if _, err := Load(path); err == nil {
+		t.Error("expected error for scheduled agent missing schedule")
+	}
+}
+
+func TestLoad_agent_missing_cmd(t *testing.T) {
+	path := writeYAML(t, `
+tasks:
+  - id: watcher
+    type: agent
+    agent_mode: scheduled
+    schedule: "@hourly"
+`)
+	if _, err := Load(path); err == nil {
+		t.Error("expected error for agent task missing cmd")
+	}
+}
+
+func TestLoad_agent_invalid_mode(t *testing.T) {
+	path := writeYAML(t, `
+tasks:
+  - id: watcher
+    type: agent
+    agent_mode: bogus
+    cmd:
+      name: watcher
+      cmd: "true"
+`)
+	if _, err := Load(path); err == nil {
+		t.Error("expected error for invalid agent_mode")
+	}
+}
+
+func TestLoad_agent_heartbeat_requires_agent_id(t *testing.T) {
+	path := writeYAML(t, `
+tasks:
+  - id: poller
+    type: agent
+    agent_mode: supervised
+    heartbeat_timeout_secs: 60
+    cmd:
+      name: poller
+      cmd: "true"
+`)
+	if _, err := Load(path); err == nil {
+		t.Error("expected error for heartbeat_timeout_secs without agent_id")
+	}
+}

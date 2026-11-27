@@ -3,28 +3,38 @@ tasks:
   # ── Daily standup summary ────────────────────────────────────────────────────
   - id: morning-standup
     name: Morning Standup Summary
+    type: ai                        # calls Claude; requires worker_id + prompt
     enabled: true
     worker_id: assistant
-    session_mode: task-isolated   # own PTY, doesn't mix with user conversations
+    session_mode: task-isolated     # own PTY, doesn't mix with user conversations
     prompt: |
       Please provide a brief morning standup summary for the team:
       - What are the key priorities for today?
       - Any blockers or risks to flag?
       Keep it to 3–5 bullet points, chat-friendly length.
-    schedule: "0 9 * * 1-5"       # 9:00 AM every weekday
+    schedule: "0 9 * * 1-5"        # 9:00 AM every weekday
     timeout_secs: 120
+    # pre_script runs first; must exit 0 or the prompt is skipped.
+    pre_script:
+      name: "warm up tables"
+      cmd: "sqlite3 /var/db/aide.db 'SELECT 1'"
+    # post_script runs after the AI response is delivered.
+    post_script:
+      name: "log run"
+      cmd: "echo morning-standup ran >> /tmp/aide-runs.log"
     outputs:
       - channel_id: my-telegram
-        room_id: "-100123456789"   # Telegram group chat id
+        room_id: "-100123456789"    # Telegram group chat id
       - channel_id: my-webex
         room_id: "Y2lzY29zcGFyazovL3VzL1JPT00vexample"
 
   # ── Hourly health ping ───────────────────────────────────────────────────────
   - id: hourly-health
     name: Hourly Health Check
-    enabled: false                 # disabled by default — enable when needed
+    type: ai
+    enabled: false                  # disabled by default — enable when needed
     worker_id: monitor
-    session_mode: worker-shared   # reuses the monitor worker's shared context
+    session_mode: worker-shared     # reuses the monitor worker's shared context
     prompt: |
       Run a quick health check. Report:
       - Any anomalies or concerns
@@ -36,9 +46,34 @@ tasks:
       - channel_id: my-telegram
         room_id: "987654321"
 
+  # ── Script-only task (no Claude involved) ───────────────────────────────────
+  # type: script runs cmd directly and posts stdout to outputs.
+  # No worker_id or prompt needed.
+  # pre_script must exit 0 or cmd is skipped.
+  - id: db-vacuum
+    name: DB Vacuum
+    type: script
+    enabled: false
+    schedule: "0 2 * * 0"          # 2:00 AM every Sunday
+    timeout_secs: 300
+    # pre_script must exit 0 — if it fails, cmd does not run.
+    pre_script:
+      name: "checkpoint WAL"
+      cmd: "sqlite3 /var/db/aide.db 'PRAGMA wal_checkpoint(FULL);'"
+    cmd:
+      name: "vacuum database"
+      cmd: "sqlite3 /var/db/aide.db 'VACUUM; PRAGMA integrity_check;'"
+    post_script:
+      name: "log completion"
+      cmd: "echo db-vacuum done >> /tmp/aide-maintenance.log"
+    outputs:
+      - channel_id: my-webex
+        room_id: "Y2lzY29zcGFyazovL3VzL1JPT00vexample"
+
   # ── Weekly digest ────────────────────────────────────────────────────────────
   - id: weekly-digest
     name: Weekly Digest
+    type: ai
     enabled: true
     worker_id: assistant
     session_mode: task-isolated
@@ -48,20 +83,72 @@ tasks:
       - Any action items or follow-ups
       - One encouraging closing thought
       Format it for a team chat message.
-    schedule: "0 17 * * 5"        # 5:00 PM every Friday
+    schedule: "0 17 * * 5"         # 5:00 PM every Friday
     timeout_secs: 180
     outputs:
       - channel_id: my-webex
         room_id: "Y2lzY29zcGFyazovL3VzL1JPT00vexample"
 
+  # ── Scheduled agent process (Python) ─────────────────────────────────────────
+  # type: agent, agent_mode: scheduled runs cmd on a cron schedule, like
+  # type: script, but its stdout/stderr stream live into aide's own log
+  # tagged `agent=<id>` as they're produced, in addition to the optional
+  # outputs posted on completion. No worker_id/prompt — cmd is typically one
+  # of the aide-agents repo's client scripts, calling aide's own /infer over
+  # the unix socket itself.
+  #
+  # Standard invocation for a Python agent: `uv run --project <dir> <script>`
+  # — never a bare `python3 script.py`. uv resolves pyproject.toml and syncs
+  # the venv automatically; see the aide-agents repo's README.
+  - id: disk-usage-watcher
+    name: Disk Usage Watcher
+    type: agent
+    agent_mode: scheduled
+    enabled: false
+    schedule: "@hourly"
+    timeout_secs: 60
+    cmd:
+      name: disk-usage-watcher
+      cmd: "uv run --project /opt/aide-agents/python /opt/aide-agents/python/examples/disk_usage_watcher.py"
+    outputs: []   # optional for type: agent — omit entirely if nothing should post to a channel
+
+  # ── Supervised (always-on) agent process (Go) ────────────────────────────────
+  # type: agent, agent_mode: supervised has no schedule — aide starts it once
+  # and keeps it running, restarting with exponential backoff (capped at
+  # max_restart_backoff_secs) if it ever exits. agent_id must match an entry
+  # under the top-level `agents:` section in config.yaml so the process can
+  # authenticate its POST /heartbeat calls. If no heartbeat arrives within
+  # heartbeat_timeout_secs, aide treats the process as stuck (not just
+  # crashed) and kills + restarts it even though it's still technically
+  # alive at the OS level. Omit heartbeat_timeout_secs (or leave it 0) if the
+  # process doesn't implement heartbeats — aide then only reacts to it
+  # actually exiting.
+  #
+  # Standard invocation for a Go agent: build once (`cd go && make build`),
+  # run the resulting binary — never `go run`, which recompiles on every
+  # invocation and execs the real binary as a child process.
+  - id: queue-poller
+    name: Queue Poller
+    type: agent
+    agent_mode: supervised
+    enabled: false
+    agent_id: queue-poller          # must match agents[].id in config.yaml
+    heartbeat_timeout_secs: 120
+    restart_backoff_secs: 5
+    max_restart_backoff_secs: 60
+    cmd:
+      name: queue-poller
+      cmd: "/opt/aide-agents/go/bin/queue-poller"
+
   # ── Pattern: multi-output fan-out ───────────────────────────────────────────
   - id: daily-briefing
     name: Daily Briefing
+    type: ai
     enabled: false
     worker_id: assistant
     session_mode: task-isolated
     prompt: "Give today's briefing. Be concise — this goes to multiple channels."
-    schedule: "30 8 * * *"        # 8:30 AM daily
+    schedule: "30 8 * * *"         # 8:30 AM daily
     timeout_secs: 90
     outputs:
       - channel_id: my-telegram
